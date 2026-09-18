@@ -21,6 +21,7 @@ async function sendMessage() {
 <template>
   <section class="negotiation-layout">
     <div class="panel">
+      <p v-if="store.error" class="alert">{{ store.error }}</p>
       <h1>Раунд переговоров</h1>
       <div v-if="store.session" class="metrics">
         <span>Доверие: {{ store.session.trustScore }}</span>
@@ -36,7 +37,7 @@ async function sendMessage() {
         <textarea v-model="message" placeholder="Введите свою реплику" rows="4" />
         <div class="actions">
           <button class="button" :disabled="!canSend">Отправить</button>
-          <button class="button secondary" type="button" :disabled="!store.session" @click="store.finish">Завершить</button>
+          <button class="button secondary" type="button" :disabled="!store.session || store.loading" @click="store.finish">Завершить</button>
         </div>
       </form>
     </div>
@@ -49,6 +50,7 @@ async function sendMessage() {
       <ul><li v-for="item in store.result.strengths" :key="item">{{ item }}</li></ul>
       <h3>Рекомендации</h3>
       <ul><li v-for="item in store.result.recommendations" :key="item">{{ item }}</li></ul>
+      <button class="button" type="button" @click="store.restart(route.params.id)">Новая попытка</button>
     </aside>
   </section>
 </template>

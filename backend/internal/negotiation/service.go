@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"strings"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 )
 
 type Service struct {
-	repo     *repository.MemoryRepository
+	repo     repository.Repository
 	provider llm.Provider
 }
 
@@ -23,59 +22,69 @@ type TurnResult struct {
 	Session domain.Session `json:"session"`
 }
 
-func NewService(repo *repository.MemoryRepository, provider llm.Provider) *Service {
+func NewService(repo repository.Repository, provider llm.Provider) *Service {
 	return &Service{repo: repo, provider: provider}
 }
 
-func (s *Service) SeedDefaults() {
-	s.repo.SaveScenario(domain.Scenario{ID: "salary-negotiation", Title: "Переговоры о зарплате", Sphere: "HR", Topic: "Повышение компенсации", Difficulty: "medium", OpponentRole: "Руководитель отдела", OpponentTone: "Сдержанный", PlayerGoal: "Добиться повышения или согласовать план пересмотра", OpponentGoal: "Сохранить сотрудника в рамках бюджета", InitialMessage: "Вы хотели обсудить вашу компенсацию. Я слушаю."})
-	s.repo.SaveScenario(domain.Scenario{ID: "project-deadline", Title: "Перенос срока проекта", Sphere: "Project management", Topic: "Согласование нового дедлайна", Difficulty: "hard", OpponentRole: "Заказчик", OpponentTone: "Требовательный", PlayerGoal: "Согласовать реалистичный срок без потери доверия", OpponentGoal: "Получить результат вовремя и снизить риски", InitialMessage: "Срок уже был подтверждён. Почему я должен соглашаться на перенос?"})
+func (s *Service) SeedDefaults(ctx context.Context) error {
+	if err := s.repo.SaveScenario(ctx, domain.Scenario{ID: "salary-negotiation", Title: "Переговоры о зарплате", Sphere: "HR", Topic: "Повышение компенсации", Difficulty: "medium", OpponentRole: "Руководитель отдела", OpponentTone: "Сдержанный", PlayerGoal: "Добиться повышения или согласовать план пересмотра", OpponentGoal: "Сохранить сотрудника в рамках бюджета", InitialMessage: "Вы хотели обсудить вашу компенсацию. Я слушаю."}); err != nil {
+		return err
+	}
+	return s.repo.SaveScenario(ctx, domain.Scenario{ID: "project-deadline", Title: "Перенос срока проекта", Sphere: "Project management", Topic: "Согласование нового дедлайна", Difficulty: "hard", OpponentRole: "Заказчик", OpponentTone: "Требовательный", PlayerGoal: "Согласовать реалистичный срок без потери доверия", OpponentGoal: "Получить результат вовремя и снизить риски", InitialMessage: "Срок уже был подтверждён. Почему я должен соглашаться на перенос?"})
 }
 
-func (s *Service) ListScenarios() []domain.Scenario { return s.repo.ListScenarios() }
+func (s *Service) ListScenarios(ctx context.Context) ([]domain.Scenario, error) {
+	return s.repo.ListScenarios(ctx)
+}
 
-func (s *Service) CreateScenario(scenario domain.Scenario) domain.Scenario {
+func (s *Service) CreateScenario(ctx context.Context, scenario domain.Scenario) (domain.Scenario, error) {
 	if scenario.ID == "" {
 		scenario.ID = slug(scenario.Title) + "-" + newID()[:6]
 	}
-	s.repo.SaveScenario(scenario)
-	return scenario
+	return scenario, s.repo.SaveScenario(ctx, scenario)
 }
 
-func (s *Service) StartSession(scenarioID string) (domain.Session, error) {
-	scenario, err := s.repo.Scenario(scenarioID)
+func (s *Service) StartSession(ctx context.Context, scenarioID string) (domain.Session, error) {
+	scenario, err := s.repo.Scenario(ctx, scenarioID)
 	if err != nil {
 		return domain.Session{}, err
 	}
 	session := domain.Session{ID: newID(), ScenarioID: scenarioID, Status: "active", TrustScore: 50, ArgumentScore: 0, PressureScore: 0, InitialMessage: scenario.InitialMessage, StartedAt: time.Now().UTC()}
-	s.repo.SaveSession(session)
-	return session, nil
+	return session, s.repo.SaveSession(ctx, session)
 }
 
-func (s *Service) Session(id string) (domain.Session, error) { return s.repo.Session(id) }
+func (s *Service) Session(ctx context.Context, id string) (domain.Session, error) {
+	return s.repo.Session(ctx, id)
+}
+func (s *Service) Messages(ctx context.Context, id string) ([]domain.Message, error) {
+	return s.repo.Messages(ctx, id)
+}
 
 func (s *Service) ProcessMessage(ctx context.Context, sessionID, message string) (TurnResult, error) {
-	session, err := s.repo.Session(sessionID)
+	session, err := s.repo.Session(ctx, sessionID)
 	if err != nil {
 		return TurnResult{}, err
 	}
 	if session.Status != "active" {
-		return TurnResult{}, errors.New("session is finished")
+		return TurnResult{}, repository.ErrConflict
 	}
 	analysis, err := s.provider.Analyze(ctx, llm.AnalysisRequest{Message: message, Turn: session.Turn, TrustScore: session.TrustScore, ArgumentScore: session.ArgumentScore})
 	if err != nil {
 		return TurnResult{}, err
 	}
+	expectedTurn := session.Turn
 	session.Turn++
 	session.TrustScore = clamp(session.TrustScore + analysis.TrustDelta)
 	session.ArgumentScore = clamp(session.ArgumentScore + analysis.ArgumentDelta)
 	session.PressureScore = clamp(session.PressureScore + analysis.PressureDelta)
-	s.repo.SaveSession(session)
+	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, analysis.Reply); err != nil {
+		return TurnResult{}, err
+	}
 	return TurnResult{Reply: analysis.Reply, Session: session}, nil
 }
 
-func (s *Service) Finish(sessionID string) (domain.Result, error) {
-	session, err := s.repo.Session(sessionID)
+func (s *Service) Finish(ctx context.Context, sessionID string) (domain.Result, error) {
+	session, err := s.repo.Session(ctx, sessionID)
 	if err != nil {
 		return domain.Result{}, err
 	}
@@ -100,12 +109,15 @@ func (s *Service) Finish(sessionID string) (domain.Result, error) {
 		result.Outcome = "Компромисс"
 	}
 	session.Status = "finished"
-	s.repo.SaveSession(session)
-	s.repo.SaveResult(result)
+	if err := s.repo.Finish(ctx, session, result); err != nil {
+		return domain.Result{}, err
+	}
 	return result, nil
 }
 
-func (s *Service) Result(sessionID string) (domain.Result, error) { return s.repo.Result(sessionID) }
+func (s *Service) Result(ctx context.Context, sessionID string) (domain.Result, error) {
+	return s.repo.Result(ctx, sessionID)
+}
 
 func newID() string {
 	data := make([]byte, 16)

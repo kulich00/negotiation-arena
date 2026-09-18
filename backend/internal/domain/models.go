@@ -35,3 +35,8 @@ type Result struct {
 	Mistakes        []string `json:"mistakes"`
 	Recommendations []string `json:"recommendations"`
 }
+
+type Message struct {
+	Sender  string `json:"sender"`
+	Content string `json:"content"`
+}

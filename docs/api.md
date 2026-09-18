@@ -9,6 +9,7 @@
 
 - `POST /api/v1/sessions` — запустить сессию.
 - `GET /api/v1/sessions/{id}` — получить состояние.
+- `GET /api/v1/sessions/{id}/messages` — получить историю реплик.
 - `POST /api/v1/sessions/{id}/messages` — отправить реплику.
 - `POST /api/v1/sessions/{id}/finish` — завершить переговоры.
 - `GET /api/v1/sessions/{id}/result` — получить итог.

@@ -10,8 +10,10 @@ import (
 
 func TestNegotiationFlow(t *testing.T) {
 	service := NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
-	service.SeedDefaults()
-	session, err := service.StartSession("salary-negotiation")
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "salary-negotiation")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +24,7 @@ func TestNegotiationFlow(t *testing.T) {
 	if turn.Session.TrustScore <= 50 {
 		t.Fatalf("expected trust to grow, got %d", turn.Session.TrustScore)
 	}
-	result, err := service.Finish(session.ID)
+	result, err := service.Finish(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
