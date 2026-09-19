@@ -34,7 +34,7 @@ func (r *MemoryRepository) ListScenarios(_ context.Context) ([]domain.Scenario, 
 	defer r.mu.RUnlock()
 	items := make([]domain.Scenario, 0, len(r.scenarios))
 	for _, scenario := range r.scenarios {
-		items = append(items, scenario)
+		items = append(items, cloneScenario(scenario))
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	return items, nil
@@ -43,7 +43,8 @@ func (r *MemoryRepository) ListScenarios(_ context.Context) ([]domain.Scenario, 
 func (r *MemoryRepository) SaveScenario(_ context.Context, scenario domain.Scenario) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.scenarios[scenario.ID] = scenario
+	scenario.Rules = scenario.Rules.WithDefaults()
+	r.scenarios[scenario.ID] = cloneScenario(scenario)
 	return nil
 }
 
@@ -54,12 +55,15 @@ func (r *MemoryRepository) Scenario(_ context.Context, id string) (domain.Scenar
 	if !ok {
 		return domain.Scenario{}, ErrNotFound
 	}
-	return item, nil
+	return cloneScenario(item), nil
 }
 
 func (r *MemoryRepository) SaveSession(_ context.Context, session domain.Session) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if session.State.Phase == "" {
+		session.State = domain.InitialSessionState()
+	}
 	r.sessions[session.ID] = session
 	r.messages[session.ID] = []domain.Message{{Sender: "opponent", Content: session.InitialMessage}}
 	return nil
@@ -122,4 +126,9 @@ func (r *MemoryRepository) Result(_ context.Context, sessionID string) (domain.R
 		return domain.Result{}, ErrNotFound
 	}
 	return item, nil
+}
+
+func cloneScenario(s domain.Scenario) domain.Scenario {
+	s.Rules.Proposal.AlternativeIDs = append([]string{}, s.Rules.Proposal.AlternativeIDs...)
+	return s
 }

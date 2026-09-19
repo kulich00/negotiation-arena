@@ -27,10 +27,16 @@ func NewService(repo repository.Repository, provider llm.Provider) *Service {
 }
 
 func (s *Service) SeedDefaults(ctx context.Context) error {
-	if err := s.repo.SaveScenario(ctx, domain.Scenario{ID: "salary-negotiation", Title: "Переговоры о зарплате", Sphere: "HR", Topic: "Повышение компенсации", Difficulty: "medium", OpponentRole: "Руководитель отдела", OpponentTone: "Сдержанный", PlayerGoal: "Добиться повышения или согласовать план пересмотра", OpponentGoal: "Сохранить сотрудника в рамках бюджета", InitialMessage: "Вы хотели обсудить вашу компенсацию. Я слушаю."}); err != nil {
+	salaryRules := domain.DefaultScenarioRules()
+	salaryRules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", MaximumValue: 10, AlternativeIDs: []string{"review_in_3_months"}}
+	if err := s.repo.SaveScenario(ctx, domain.Scenario{ID: "salary-negotiation", Title: "Переговоры о зарплате", Sphere: "HR", Topic: "Повышение компенсации", Difficulty: "medium", OpponentRole: "Руководитель отдела", OpponentTone: "Сдержанный", PlayerGoal: "Добиться повышения или согласовать план пересмотра", OpponentGoal: "Сохранить сотрудника в рамках бюджета", InitialMessage: "Вы хотели обсудить вашу компенсацию. Я слушаю.", Rules: salaryRules}); err != nil {
 		return err
 	}
-	return s.repo.SaveScenario(ctx, domain.Scenario{ID: "project-deadline", Title: "Перенос срока проекта", Sphere: "Project management", Topic: "Согласование нового дедлайна", Difficulty: "hard", OpponentRole: "Заказчик", OpponentTone: "Требовательный", PlayerGoal: "Согласовать реалистичный срок без потери доверия", OpponentGoal: "Получить результат вовремя и снизить риски", InitialMessage: "Срок уже был подтверждён. Почему я должен соглашаться на перенос?"})
+	deadlineRules := domain.DefaultScenarioRules()
+	deadlineRules.MaxTurns = 10
+	deadlineRules.MinimumTrustForAgreement = 60
+	deadlineRules.Proposal = domain.ProposalConstraint{Kind: "extension_days", MaximumValue: 14, AlternativeIDs: []string{"phased_delivery"}}
+	return s.repo.SaveScenario(ctx, domain.Scenario{ID: "project-deadline", Title: "Перенос срока проекта", Sphere: "Project management", Topic: "Согласование нового дедлайна", Difficulty: "hard", OpponentRole: "Заказчик", OpponentTone: "Требовательный", PlayerGoal: "Согласовать реалистичный срок без потери доверия", OpponentGoal: "Получить результат вовремя и снизить риски", InitialMessage: "Срок уже был подтверждён. Почему я должен соглашаться на перенос?", Rules: deadlineRules})
 }
 
 func (s *Service) ListScenarios(ctx context.Context) ([]domain.Scenario, error) {
@@ -41,6 +47,7 @@ func (s *Service) CreateScenario(ctx context.Context, scenario domain.Scenario) 
 	if scenario.ID == "" {
 		scenario.ID = slug(scenario.Title) + "-" + newID()[:6]
 	}
+	scenario.Rules = scenario.Rules.WithDefaults()
 	return scenario, s.repo.SaveScenario(ctx, scenario)
 }
 
@@ -49,7 +56,7 @@ func (s *Service) StartSession(ctx context.Context, scenarioID string) (domain.S
 	if err != nil {
 		return domain.Session{}, err
 	}
-	session := domain.Session{ID: newID(), ScenarioID: scenarioID, Status: "active", TrustScore: 50, ArgumentScore: 0, PressureScore: 0, InitialMessage: scenario.InitialMessage, StartedAt: time.Now().UTC()}
+	session := domain.Session{ID: newID(), ScenarioID: scenarioID, Status: "active", TrustScore: 50, ArgumentScore: 0, PressureScore: 0, InitialMessage: scenario.InitialMessage, StartedAt: time.Now().UTC(), State: domain.InitialSessionState()}
 	return session, s.repo.SaveSession(ctx, session)
 }
 
@@ -109,6 +116,7 @@ func (s *Service) Finish(ctx context.Context, sessionID string) (domain.Result, 
 		result.Outcome = "Компромисс"
 	}
 	session.Status = "finished"
+	session.State.Phase = domain.PhaseFinished
 	if err := s.repo.Finish(ctx, session, result); err != nil {
 		return domain.Result{}, err
 	}

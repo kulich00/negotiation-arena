@@ -30,7 +30,24 @@ func TestPostgresPersistence(t *testing.T) {
 	defer pool.Close()
 
 	repo := repository.NewPostgresRepository(pool)
-	scenario := domain.Scenario{ID: "integration-" + time.Now().Format("20060102150405.000000000"), Title: "Integration", InitialMessage: "Начнём переговоры"}
+	seedService := negotiation.NewService(repo, llm.NewMockProvider())
+	if err := seedService.SeedDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	salary, err := repo.Scenario(ctx, "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline, err := repo.Scenario(ctx, "project-deadline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if salary.Rules.Proposal.Kind != "raise_percent" || salary.Rules.Proposal.MaximumValue != 10 || deadline.Rules.Proposal.Kind != "extension_days" || deadline.Rules.MaxTurns != 10 {
+		t.Fatalf("unexpected seeded rules: salary=%+v deadline=%+v", salary.Rules, deadline.Rules)
+	}
+	rules := domain.DefaultScenarioRules()
+	rules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", MaximumValue: 7, AlternativeIDs: []string{"review_later"}}
+	scenario := domain.Scenario{ID: "integration-" + time.Now().Format("20060102150405.000000000"), Title: "Integration", InitialMessage: "Начнём переговоры", Rules: rules}
 	if err := repo.SaveScenario(ctx, scenario); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +60,18 @@ func TestPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessMessage(ctx, session.ID, "Какие условия возможны?"); err != nil {
+	turn, err := service.ProcessMessage(ctx, session.ID, "Какие условия возможны?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := turn.Session
+	updated.Turn++
+	updated.State.Phase = domain.PhaseBargaining
+	updated.State.InterestsExplored = true
+	updated.State.EvidencePresented = true
+	updated.State.OfferMade = true
+	updated.State.LastOfferID = "review_later"
+	if err := repo.ApplyTurn(ctx, updated, turn.Session.Turn, "Предлагаю пересмотр через три месяца", "Это можно обсудить"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Finish(ctx, session.ID)
@@ -52,18 +80,25 @@ func TestPostgresPersistence(t *testing.T) {
 	}
 
 	reopened := repository.NewPostgresRepository(pool)
+	loadedScenario, err := reopened.Scenario(ctx, scenario.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedScenario.Rules.Proposal.MaximumValue != 7 || len(loadedScenario.Rules.Proposal.AlternativeIDs) != 1 || loadedScenario.Rules.Proposal.AlternativeIDs[0] != "review_later" {
+		t.Fatalf("unexpected scenario rules: %+v", loadedScenario.Rules)
+	}
 	loadedSession, err := reopened.Session(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedSession.Status != "finished" || loadedSession.Turn != 1 {
+	if loadedSession.Status != "finished" || loadedSession.Turn != 2 || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.InterestsExplored || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || loadedSession.State.LastOfferID != "review_later" {
 		t.Fatalf("unexpected session: %+v", loadedSession)
 	}
 	messages, err := reopened.Messages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 3 || messages[0].Content != scenario.InitialMessage || messages[1].Content != "Какие условия возможны?" {
+	if len(messages) != 5 || messages[0].Content != scenario.InitialMessage || messages[1].Content != "Какие условия возможны?" {
 		t.Fatalf("unexpected messages: %+v", messages)
 	}
 	loadedResult, err := reopened.Result(ctx, session.ID)

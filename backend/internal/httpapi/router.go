@@ -52,7 +52,29 @@ func (h *Handler) listScenarios(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load scenarios")
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	public := make([]publicScenario, 0, len(items))
+	for _, scenario := range items {
+		public = append(public, publicScenario{
+			ID: scenario.ID, Title: scenario.Title, Sphere: scenario.Sphere,
+			Topic: scenario.Topic, Difficulty: scenario.Difficulty,
+			OpponentRole: scenario.OpponentRole, OpponentTone: scenario.OpponentTone,
+			PlayerGoal: scenario.PlayerGoal, InitialMessage: scenario.InitialMessage,
+		})
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+// publicScenario omits the opponent's objective and private rules.
+type publicScenario struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Sphere         string `json:"sphere"`
+	Topic          string `json:"topic"`
+	Difficulty     string `json:"difficulty"`
+	OpponentRole   string `json:"opponentRole"`
+	OpponentTone   string `json:"opponentTone"`
+	PlayerGoal     string `json:"playerGoal"`
+	InitialMessage string `json:"initialMessage"`
 }
 
 func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
