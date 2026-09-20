@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,6 +23,76 @@ type TurnResult struct {
 	Session domain.Session `json:"session"`
 }
 
+type MoveIntent string
+
+const (
+	IntentAskInterest     MoveIntent = "ask_interest"
+	IntentPresentEvidence MoveIntent = "present_evidence"
+	IntentPropose         MoveIntent = "propose"
+	IntentAccept          MoveIntent = "accept"
+	IntentPressure        MoveIntent = "pressure"
+)
+
+type PlayerMove struct {
+	Content  string        `json:"content"`
+	Intent   MoveIntent    `json:"intent"`
+	Proposal *MoveProposal `json:"proposal,omitempty"`
+}
+
+type MoveProposal struct {
+	Kind          string `json:"kind"`
+	Value         int    `json:"value"`
+	AlternativeID string `json:"alternativeId"`
+}
+
+var ErrInvalidMove = fmt.Errorf("invalid move")
+
+func ValidateMove(move PlayerMove, rules domain.ScenarioRules) error {
+	if strings.TrimSpace(move.Content) == "" {
+		return fmt.Errorf("%w: content is required", ErrInvalidMove)
+	}
+
+	switch move.Intent {
+	case IntentPropose:
+		if move.Proposal == nil {
+			return fmt.Errorf("%w: proposal is required", ErrInvalidMove)
+		}
+	case IntentAskInterest, IntentPresentEvidence, IntentAccept, IntentPressure:
+		if move.Proposal != nil {
+			return fmt.Errorf("%w: proposal is only allowed for propose", ErrInvalidMove)
+		}
+
+	default:
+		return fmt.Errorf("%w: invalid intent", ErrInvalidMove)
+	}
+
+	if move.Intent != IntentPropose {
+		return nil
+	}
+
+	p := move.Proposal // для propose его наличие уже проверено в switch
+
+	if p.AlternativeID != "" {
+		if p.Kind != "" || p.Value != 0 {
+			return fmt.Errorf("%w: alternative cannot contain kind or value", ErrInvalidMove)
+		}
+		for _, allowed := range rules.Proposal.AlternativeIDs {
+			if p.AlternativeID == allowed {
+				return nil
+			}
+		}
+		return fmt.Errorf("%w: unknown alternative", ErrInvalidMove)
+	}
+
+	if p.Kind != rules.Proposal.Kind ||
+		p.Value < 1 ||
+		p.Value > rules.Proposal.MaximumValue {
+		return fmt.Errorf("%w: invalid numeric proposal", ErrInvalidMove)
+	}
+
+	return nil
+
+}
 func NewService(repo repository.Repository, provider llm.Provider) *Service {
 	return &Service{repo: repo, provider: provider}
 }
