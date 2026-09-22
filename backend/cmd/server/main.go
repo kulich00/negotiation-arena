@@ -32,9 +32,19 @@ func main() {
 		defer db.Close()
 	}
 
-	repo := repository.NewMemoryRepository()
+	var repo repository.Repository = repository.NewMemoryRepository()
+	if db != nil {
+		if err := database.Migrate(ctx, cfg.DatabaseURL); err != nil {
+			logger.Error("database migration failed", "error", err)
+			os.Exit(1)
+		}
+		repo = repository.NewPostgresRepository(db)
+	}
 	service := negotiation.NewService(repo, llm.NewMockProvider())
-	service.SeedDefaults()
+	if err := service.SeedDefaults(ctx); err != nil {
+		logger.Error("scenario initialization failed", "error", err)
+		os.Exit(1)
+	}
 
 	handler := httpapi.NewHandler(service, db, cfg, logger)
 	server := &http.Server{

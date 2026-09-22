@@ -90,6 +90,98 @@ function restartNegotiation() {
 </script>
 
 <template>
+<script setup>
+import { computed, onMounted, ref, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useNegotiationStore } from '../stores/negotiation'
+
+const route = useRoute()
+const router = useRouter()
+const store = useNegotiationStore()
+
+const message = ref('')
+const dialogueContainer = ref(null)
+
+const currentScenario = computed(() => {
+  if (!store.session) return null
+  return store.scenarios.find((s) => s.id === store.session.scenarioId) || null
+})
+
+const canSend = computed(() => message.value.trim() && !store.loading && !store.result)
+
+onMounted(async () => {
+  if (!store.scenarios.length) {
+    await store.loadScenarios()
+  }
+  try {
+    await store.startSession(route.params.id)
+    scrollToBottom()
+  } catch (e) {
+    console.error('Ошибка старта сессии:', e)
+  }
+})
+
+// Автоскролл чата при новых сообщениях
+watch(
+  () => store.messages.length,
+  async () => {
+    await nextTick()
+    scrollToBottom()
+  }
+)
+
+function scrollToBottom() {
+  if (dialogueContainer.value) {
+    dialogueContainer.value.scrollTop = dialogueContainer.value.scrollHeight
+  }
+}
+
+async function sendMessage() {
+  if (!canSend.value) return
+  const content = message.value
+  message.value = ''
+  await store.sendMessage(content)
+}
+
+function handleKeydown(event) {
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    sendMessage()
+  }
+}
+
+// Полезные фразы-подсказки для быстрой подстановки (техники переговоров)
+const promptHints = [
+  'Задать открытый вопрос (SPIN)',
+  'Озвучить интересы и BATNA',
+  'Предложить компромисс',
+  'Уточнить критерии сделки'
+]
+
+function applyHint(hintText) {
+  if (hintText.includes('SPIN')) {
+    message.value = 'Какие ключевые показатели или результаты для вас сейчас наиболее критичны?'
+  } else if (hintText.includes('BATNA')) {
+    message.value = 'Давайте обсудим условия, при которых наше сотрудничество станет взаимно выгодным.'
+  } else if (hintText.includes('компромисс')) {
+    message.value = 'Если мы пойдем навстречу в вопросе сроков, готовы ли вы рассмотреть зафиксированный объем?'
+  } else {
+    message.value = 'Какие конкретные критерии позволят вам принять положительное решение?'
+  }
+}
+
+function getScoreColorClass(score) {
+  if (score >= 70) return 'score-high'
+  if (score >= 40) return 'score-mid'
+  return 'score-low'
+}
+
+function restartNegotiation() {
+  store.restart(route.params.id)
+}
+</script>
+
+<template>
   <div class="negotiation-page">
     <!-- Навигация назад -->
     <div class="page-header">
@@ -303,6 +395,8 @@ function restartNegotiation() {
       </aside>
     </section>
   </div>
+</template>
+
 </template>
 
 
