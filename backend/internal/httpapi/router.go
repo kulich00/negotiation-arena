@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/kulich00/negotiation-arena/backend/internal/config"
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
 	"github.com/kulich00/negotiation-arena/backend/internal/negotiation"
+	"github.com/kulich00/negotiation-arena/backend/internal/repository"
 )
 
 type Handler struct {
@@ -31,9 +33,10 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /health/ready", h.ready)
-	mux.HandleFunc("GET /api/v1/scenarios", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, h.service.ListScenarios()) })
+	mux.HandleFunc("GET /api/v1/scenarios", h.listScenarios)
 	mux.HandleFunc("POST /api/v1/sessions", h.startSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", h.getSession)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", h.getMessages)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/messages", h.processMessage)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/finish", h.finishSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/result", h.getResult)
@@ -41,6 +44,37 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/scenarios", h.createScenario)
 	mux.Handle("/", static)
 	return h.recover(h.logRequests(mux))
+}
+
+func (h *Handler) listScenarios(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListScenarios(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load scenarios")
+		return
+	}
+	public := make([]publicScenario, 0, len(items))
+	for _, scenario := range items {
+		public = append(public, publicScenario{
+			ID: scenario.ID, Title: scenario.Title, Sphere: scenario.Sphere,
+			Topic: scenario.Topic, Difficulty: scenario.Difficulty,
+			OpponentRole: scenario.OpponentRole, OpponentTone: scenario.OpponentTone,
+			PlayerGoal: scenario.PlayerGoal, InitialMessage: scenario.InitialMessage,
+		})
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+// publicScenario omits the opponent's objective and private rules.
+type publicScenario struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Sphere         string `json:"sphere"`
+	Topic          string `json:"topic"`
+	Difficulty     string `json:"difficulty"`
+	OpponentRole   string `json:"opponentRole"`
+	OpponentTone   string `json:"opponentTone"`
+	PlayerGoal     string `json:"playerGoal"`
+	InitialMessage string `json:"initialMessage"`
 }
 
 func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
@@ -62,21 +96,30 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	session, err := h.service.StartSession(body.ScenarioID)
+	session, err := h.service.StartSession(r.Context(), body.ScenarioID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "scenario not found")
+		writeStorageError(w, err, "scenario not found")
 		return
 	}
 	writeJSON(w, http.StatusCreated, session)
 }
 
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
-	session, err := h.service.Session(r.PathValue("id"))
+	session, err := h.service.Session(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
+		writeStorageError(w, err, "session not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, session)
+}
+
+func (h *Handler) getMessages(w http.ResponseWriter, r *http.Request) {
+	messages, err := h.service.Messages(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStorageError(w, err, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, messages)
 }
 
 func (h *Handler) processMessage(w http.ResponseWriter, r *http.Request) {
@@ -92,25 +135,25 @@ func (h *Handler) processMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.service.ProcessMessage(r.Context(), r.PathValue("id"), body.Content)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeStorageError(w, err, "session not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) finishSession(w http.ResponseWriter, r *http.Request) {
-	result, err := h.service.Finish(r.PathValue("id"))
+	result, err := h.service.Finish(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
+		writeStorageError(w, err, "session not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) getResult(w http.ResponseWriter, r *http.Request) {
-	result, err := h.service.Result(r.PathValue("id"))
+	result, err := h.service.Result(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "result not found")
+		writeStorageError(w, err, "result not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -142,7 +185,23 @@ func (h *Handler) createScenario(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title and initialMessage are required")
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.service.CreateScenario(scenario))
+	created, err := h.service.CreateScenario(r.Context(), scenario)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save scenario")
+		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func writeStorageError(w http.ResponseWriter, err error, notFoundMessage string) {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, http.StatusNotFound, notFoundMessage)
+	case errors.Is(err, repository.ErrConflict):
+		writeError(w, http.StatusConflict, "session changed; reload and try again")
+	default:
+		writeError(w, http.StatusInternalServerError, "storage unavailable")
+	}
 }
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {

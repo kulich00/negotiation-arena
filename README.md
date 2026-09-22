@@ -57,6 +57,7 @@ Vite проксирует запросы `/api` и `/health` на `http://localh
 - резервный `MockProvider`, не требующий внешнего AI API;
 - healthcheck;
 - PostgreSQL-миграция;
+- постоянное хранение сценариев, сессий, истории реплик и результатов в PostgreSQL;
 - production Dockerfile;
 - CI для frontend, backend и Docker.
 
@@ -66,6 +67,8 @@ Vite проксирует запросы `/api` и `/health` на `http://localh
 оставить `LLM_PROVIDER=mock`. Секреты и настоящий `.env` нельзя коммитить.
 
 ## Миграции
+
+При запуске сервера с `DATABASE_URL` миграции применяются автоматически. Без `DATABASE_URL` сервер использует хранилище в памяти для разработки.
 
 ```bash
 make migrate-up

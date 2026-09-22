@@ -17,6 +17,9 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ scenarioId }),
   }),
+  getSession: (sessionId) => request(`/api/v1/sessions/${sessionId}`),
+  getMessages: (sessionId) => request(`/api/v1/sessions/${sessionId}/messages`),
+  getResult: (sessionId) => request(`/api/v1/sessions/${sessionId}/result`),
   sendMessage: (sessionId, content) => request(`/api/v1/sessions/${sessionId}/messages`, {
     method: 'POST',
     body: JSON.stringify({ content }),

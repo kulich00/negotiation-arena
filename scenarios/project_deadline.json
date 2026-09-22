@@ -8,6 +8,20 @@
   "opponentTone": "Требовательный",
   "playerGoal": "Согласовать реалистичный срок без потери доверия",
   "opponentGoal": "Получить результат вовремя и снизить риски",
-  "initialMessage": "Срок уже был подтверждён. Почему я должен соглашаться на перенос?"
+  "initialMessage": "Срок уже был подтверждён. Почему я должен соглашаться на перенос?",
+  "rules": {
+    "maxTurns": 10,
+    "minimumTrustForAgreement": 60,
+    "requiresInterestExploration": true,
+    "requiresEvidence": true,
+    "proposal": {
+      "kind": "extension_days",
+      "maximumValue": 14,
+      "alternativeIds": ["phased_delivery"]
+    },
+    "trustScoreWeight": 1,
+    "argumentScoreWeight": 1,
+    "pressureScoreWeight": 1
+  }
 }
 
