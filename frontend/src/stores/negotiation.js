@@ -1,12 +1,15 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
 
+const HISTORY_STORAGE_KEY = 'negotiation_attempts_history'
+
 export const useNegotiationStore = defineStore('negotiation', {
   state: () => ({
     scenarios: [],
     session: null,
     messages: [],
     result: null,
+    history: JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]'),
     loading: false,
     error: '',
   }),
@@ -50,7 +53,40 @@ export const useNegotiationStore = defineStore('negotiation', {
     async finish() {
       if (!this.session) return
       this.result = await api.finishSession(this.session.id)
+      
+      // Сохраняем попытку в историю
+      if (this.result) {
+        const scenario = this.scenarios.find((s) => s.id === this.session.scenarioId)
+        const attempt = {
+          id: Date.now().toString(),
+          scenarioId: this.session.scenarioId,
+          scenarioTitle: scenario ? scenario.title : 'Сценарий переговоров',
+          date: new Date().toLocaleString('ru-RU', {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          turnsCount: this.session.turn,
+          finalScore: this.result.finalScore,
+          outcome: this.result.outcome,
+          trustScore: this.session.trustScore,
+          argumentScore: this.session.argumentScore,
+        }
+
+        this.history.unshift(attempt)
+        // Храним последние 20 попыток
+        if (this.history.length > 20) {
+          this.history.pop()
+        }
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(this.history))
+      }
+    },
+    clearHistory() {
+      this.history = []
+      localStorage.removeItem(HISTORY_STORAGE_KEY)
     },
   },
 })
+
 
