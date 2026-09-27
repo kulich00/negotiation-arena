@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
 	"github.com/kulich00/negotiation-arena/backend/internal/llm"
@@ -23,76 +23,6 @@ type TurnResult struct {
 	Session domain.Session `json:"session"`
 }
 
-type MoveIntent string
-
-const (
-	IntentAskInterest     MoveIntent = "ask_interest"
-	IntentPresentEvidence MoveIntent = "present_evidence"
-	IntentPropose         MoveIntent = "propose"
-	IntentAccept          MoveIntent = "accept"
-	IntentPressure        MoveIntent = "pressure"
-)
-
-type PlayerMove struct {
-	Content  string        `json:"content"`
-	Intent   MoveIntent    `json:"intent"`
-	Proposal *MoveProposal `json:"proposal,omitempty"`
-}
-
-type MoveProposal struct {
-	Kind          string `json:"kind"`
-	Value         int    `json:"value"`
-	AlternativeID string `json:"alternativeId"`
-}
-
-var ErrInvalidMove = fmt.Errorf("invalid move")
-
-func ValidateMove(move PlayerMove, rules domain.ScenarioRules) error {
-	if strings.TrimSpace(move.Content) == "" {
-		return fmt.Errorf("%w: content is required", ErrInvalidMove)
-	}
-
-	switch move.Intent {
-	case IntentPropose:
-		if move.Proposal == nil {
-			return fmt.Errorf("%w: proposal is required", ErrInvalidMove)
-		}
-	case IntentAskInterest, IntentPresentEvidence, IntentAccept, IntentPressure:
-		if move.Proposal != nil {
-			return fmt.Errorf("%w: proposal is only allowed for propose", ErrInvalidMove)
-		}
-
-	default:
-		return fmt.Errorf("%w: invalid intent", ErrInvalidMove)
-	}
-
-	if move.Intent != IntentPropose {
-		return nil
-	}
-
-	p := move.Proposal // для propose его наличие уже проверено в switch
-
-	if p.AlternativeID != "" {
-		if p.Kind != "" || p.Value != 0 {
-			return fmt.Errorf("%w: alternative cannot contain kind or value", ErrInvalidMove)
-		}
-		for _, allowed := range rules.Proposal.AlternativeIDs {
-			if p.AlternativeID == allowed {
-				return nil
-			}
-		}
-		return fmt.Errorf("%w: unknown alternative", ErrInvalidMove)
-	}
-
-	if p.Kind != rules.Proposal.Kind ||
-		p.Value < 1 ||
-		p.Value > rules.Proposal.MaximumValue {
-		return fmt.Errorf("%w: invalid numeric proposal", ErrInvalidMove)
-	}
-
-	return nil
-
-}
 func NewService(repo repository.Repository, provider llm.Provider) *Service {
 	return &Service{repo: repo, provider: provider}
 }
@@ -115,10 +45,14 @@ func (s *Service) ListScenarios(ctx context.Context) ([]domain.Scenario, error) 
 }
 
 func (s *Service) CreateScenario(ctx context.Context, scenario domain.Scenario) (domain.Scenario, error) {
+	scenario = normalizeScenario(scenario)
 	if scenario.ID == "" {
 		scenario.ID = slug(scenario.Title) + "-" + newID()[:6]
 	}
 	scenario.Rules = scenario.Rules.WithDefaults()
+	if err := ValidateScenario(scenario); err != nil {
+		return domain.Scenario{}, err
+	}
 	return scenario, s.repo.SaveScenario(ctx, scenario)
 }
 
@@ -139,6 +73,19 @@ func (s *Service) Messages(ctx context.Context, id string) ([]domain.Message, er
 }
 
 func (s *Service) ProcessMessage(ctx context.Context, sessionID, message string) (TurnResult, error) {
+	message = strings.TrimSpace(message)
+	if err := validateMoveContent(message); err != nil {
+		return TurnResult{}, err
+	}
+	return s.processTurn(ctx, sessionID, message, nil)
+}
+
+func (s *Service) ProcessMove(ctx context.Context, sessionID string, move PlayerMove) (TurnResult, error) {
+	move.Content = strings.TrimSpace(move.Content)
+	return s.processTurn(ctx, sessionID, move.Content, &move)
+}
+
+func (s *Service) processTurn(ctx context.Context, sessionID, message string, move *PlayerMove) (TurnResult, error) {
 	session, err := s.repo.Session(ctx, sessionID)
 	if err != nil {
 		return TurnResult{}, err
@@ -146,19 +93,49 @@ func (s *Service) ProcessMessage(ctx context.Context, sessionID, message string)
 	if session.Status != "active" {
 		return TurnResult{}, repository.ErrConflict
 	}
-	analysis, err := s.provider.Analyze(ctx, llm.AnalysisRequest{Message: message, Turn: session.Turn, TrustScore: session.TrustScore, ArgumentScore: session.ArgumentScore})
+	scenario, err := s.repo.Scenario(ctx, session.ScenarioID)
 	if err != nil {
 		return TurnResult{}, err
 	}
+	if session.Turn >= scenario.Rules.MaxTurns {
+		return TurnResult{}, ErrTurnLimitReached
+	}
+
+	var (
+		evaluation MoveEvaluation
+		reply      string
+	)
+	if move != nil {
+		if err := ValidateMove(*move, scenario.Rules); err != nil {
+			return TurnResult{}, err
+		}
+		if move.Intent == IntentAccept && !session.State.OfferMade {
+			return TurnResult{}, fmtInvalidMove("there is no offer to accept")
+		}
+		evaluation = EvaluateMove(*move, session.State)
+		reply = GenerateOpponentReply(*move, session, scenario.Rules, evaluation)
+	} else {
+		analysis, err := s.provider.Analyze(ctx, llm.AnalysisRequest{Message: message, Turn: session.Turn, TrustScore: session.TrustScore, ArgumentScore: session.ArgumentScore})
+		if err != nil {
+			return TurnResult{}, err
+		}
+		reply = analysis.Reply
+		evaluation.TrustDelta = analysis.TrustDelta
+		evaluation.ArgumentDelta = analysis.ArgumentDelta
+		evaluation.PressureDelta = analysis.PressureDelta
+	}
 	expectedTurn := session.Turn
 	session.Turn++
-	session.TrustScore = clamp(session.TrustScore + analysis.TrustDelta)
-	session.ArgumentScore = clamp(session.ArgumentScore + analysis.ArgumentDelta)
-	session.PressureScore = clamp(session.PressureScore + analysis.PressureDelta)
-	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, analysis.Reply); err != nil {
+	session.TrustScore = clamp(session.TrustScore + evaluation.TrustDelta)
+	session.ArgumentScore = clamp(session.ArgumentScore + evaluation.ArgumentDelta)
+	session.PressureScore = clamp(session.PressureScore + evaluation.PressureDelta)
+	if move != nil {
+		session.State = evaluation.State
+	}
+	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, reply); err != nil {
 		return TurnResult{}, err
 	}
-	return TurnResult{Reply: analysis.Reply, Session: session}, nil
+	return TurnResult{Reply: reply, Session: session}, nil
 }
 
 func (s *Service) Finish(ctx context.Context, sessionID string) (domain.Result, error) {
@@ -166,26 +143,14 @@ func (s *Service) Finish(ctx context.Context, sessionID string) (domain.Result, 
 	if err != nil {
 		return domain.Result{}, err
 	}
-	score := clamp(session.TrustScore + session.ArgumentScore*5 - session.PressureScore*4)
-	result := domain.Result{SessionID: sessionID, FinalScore: score, Outcome: "Переговоры требуют доработки", Strengths: []string{}, Mistakes: []string{}, Recommendations: []string{}}
-	if session.ArgumentScore > 2 {
-		result.Strengths = append(result.Strengths, "Аргументы опирались на факты")
-	} else {
-		result.Recommendations = append(result.Recommendations, "Добавьте измеримые результаты и факты")
+	if session.Status != "active" {
+		return domain.Result{}, repository.ErrConflict
 	}
-	if session.TrustScore >= 53 {
-		result.Strengths = append(result.Strengths, "Удалось сохранить доверие")
-	} else {
-		result.Recommendations = append(result.Recommendations, "Задавайте больше открытых вопросов")
+	scenario, err := s.repo.Scenario(ctx, session.ScenarioID)
+	if err != nil {
+		return domain.Result{}, err
 	}
-	if session.PressureScore > 2 {
-		result.Mistakes = append(result.Mistakes, "Избыточное давление")
-	}
-	if score >= 70 {
-		result.Outcome = "Выгодное соглашение"
-	} else if score >= 50 {
-		result.Outcome = "Компромисс"
-	}
+	result := EvaluateResult(session, scenario.Rules)
 	session.Status = "finished"
 	session.State.Phase = domain.PhaseFinished
 	if err := s.repo.Finish(ctx, session, result); err != nil {
@@ -213,5 +178,20 @@ func clamp(value int) int {
 	return value
 }
 func slug(value string) string {
-	return strings.Trim(strings.ReplaceAll(strings.ToLower(value), " ", "-"), "-")
+	var result strings.Builder
+	separator := false
+	for _, char := range strings.ToLower(value) {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			result.WriteRune(char)
+			separator = false
+		} else if result.Len() > 0 && !separator {
+			result.WriteByte('-')
+			separator = true
+		}
+	}
+	value = strings.Trim(result.String(), "-")
+	if value == "" {
+		return "scenario"
+	}
+	return value
 }

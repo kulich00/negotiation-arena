@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kulich00/negotiation-arena/backend/internal/config"
+	"github.com/kulich00/negotiation-arena/backend/internal/adminauth"
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
 	"github.com/kulich00/negotiation-arena/backend/internal/negotiation"
 	"github.com/kulich00/negotiation-arena/backend/internal/repository"
@@ -18,13 +19,13 @@ import (
 
 type Handler struct {
 	service *negotiation.Service
+	auth    *adminauth.Service
 	db      *pgxpool.Pool
-	cfg     config.Config
 	logger  *slog.Logger
 }
 
-func NewHandler(service *negotiation.Service, db *pgxpool.Pool, cfg config.Config, logger *slog.Logger) *Handler {
-	return &Handler{service: service, db: db, cfg: cfg, logger: logger}
+func NewHandler(service *negotiation.Service, auth *adminauth.Service, db *pgxpool.Pool, logger *slog.Logger) *Handler {
+	return &Handler{service: service, auth: auth, db: db, logger: logger}
 }
 
 func (h *Handler) Router(static http.Handler) http.Handler {
@@ -41,6 +42,7 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions/{id}/finish", h.finishSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/result", h.getResult)
 	mux.HandleFunc("POST /api/v1/admin/login", h.login)
+	mux.HandleFunc("POST /api/v1/admin/logout", h.logout)
 	mux.HandleFunc("POST /api/v1/admin/scenarios", h.createScenario)
 	mux.Handle("/", static)
 	return h.recover(h.logRequests(mux))
@@ -123,18 +125,29 @@ func (h *Handler) getMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) processMessage(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Content string `json:"content"`
-	}
-	if !decode(w, r, &body) {
+	var move negotiation.PlayerMove
+	if !decode(w, r, &move) {
 		return
 	}
-	if strings.TrimSpace(body.Content) == "" {
-		writeError(w, http.StatusBadRequest, "content is required")
-		return
+
+	var (
+		result negotiation.TurnResult
+		err    error
+	)
+	if move.Intent == "" && move.Proposal == nil {
+		result, err = h.service.ProcessMessage(r.Context(), r.PathValue("id"), move.Content)
+	} else {
+		result, err = h.service.ProcessMove(r.Context(), r.PathValue("id"), move)
 	}
-	result, err := h.service.ProcessMessage(r.Context(), r.PathValue("id"), body.Content)
 	if err != nil {
+		if errors.Is(err, negotiation.ErrInvalidMove) {
+			writeError(w, http.StatusBadRequest, "invalid move")
+			return
+		}
+		if errors.Is(err, negotiation.ErrTurnLimitReached) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		writeStorageError(w, err, "session not found")
 		return
 	}
@@ -160,37 +173,64 @@ func (h *Handler) getResult(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	var body struct{ Email, Password string }
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.Email != h.cfg.AdminEmail || body.Password != h.cfg.AdminPassword {
+	session, err := h.auth.Login(r.Context(), body.Email, body.Password)
+	if errors.Is(err, adminauth.ErrInvalidCredentials) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": adminToken(h.cfg.SecretKey)})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "authentication unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if err := h.auth.Logout(r.Context(), bearerToken(r.Header.Get("Authorization"))); err != nil {
+		writeError(w, http.StatusInternalServerError, "authentication unavailable")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) createScenario(w http.ResponseWriter, r *http.Request) {
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !validToken(token, h.cfg.SecretKey) {
+	token := bearerToken(r.Header.Get("Authorization"))
+	if err := h.auth.Authenticate(r.Context(), token); errors.Is(err, adminauth.ErrInvalidToken) {
 		writeError(w, http.StatusUnauthorized, "invalid token")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "authentication unavailable")
 		return
 	}
 	var scenario domain.Scenario
 	if !decode(w, r, &scenario) {
 		return
 	}
-	if scenario.Title == "" || scenario.InitialMessage == "" {
-		writeError(w, http.StatusBadRequest, "title and initialMessage are required")
-		return
-	}
 	created, err := h.service.CreateScenario(r.Context(), scenario)
 	if err != nil {
+		if errors.Is(err, negotiation.ErrInvalidScenario) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "could not save scenario")
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func bearerToken(header string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }
 
 func writeStorageError(w http.ResponseWriter, err error, notFoundMessage string) {
@@ -206,7 +246,13 @@ func writeStorageError(w http.ResponseWriter, err error, notFoundMessage string)
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	defer r.Body.Close()
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(target); err != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return false
 	}

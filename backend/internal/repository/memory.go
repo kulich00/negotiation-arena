@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
 )
@@ -13,20 +14,75 @@ var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("session changed")
 
 type MemoryRepository struct {
-	mu        sync.RWMutex
-	scenarios map[string]domain.Scenario
-	sessions  map[string]domain.Session
-	messages  map[string][]domain.Message
-	results   map[string]domain.Result
+	mu            sync.RWMutex
+	scenarios     map[string]domain.Scenario
+	sessions      map[string]domain.Session
+	messages      map[string][]domain.Message
+	results       map[string]domain.Result
+	admins        map[string]string
+	adminSessions map[string]memoryAdminSession
+}
+
+type memoryAdminSession struct {
+	email     string
+	expiresAt time.Time
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		scenarios: make(map[string]domain.Scenario),
-		sessions:  make(map[string]domain.Session),
-		messages:  make(map[string][]domain.Message),
-		results:   make(map[string]domain.Result),
+		scenarios:     make(map[string]domain.Scenario),
+		sessions:      make(map[string]domain.Session),
+		messages:      make(map[string][]domain.Message),
+		results:       make(map[string]domain.Result),
+		admins:        make(map[string]string),
+		adminSessions: make(map[string]memoryAdminSession),
 	}
+}
+
+func (r *MemoryRepository) SetAdminPassword(_ context.Context, email, passwordHash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.admins[email] = passwordHash
+	for tokenHash, session := range r.adminSessions {
+		if session.email == email {
+			delete(r.adminSessions, tokenHash)
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepository) AdminPasswordHash(_ context.Context, email string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	hash, ok := r.admins[email]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return hash, nil
+}
+
+func (r *MemoryRepository) SaveAdminSession(_ context.Context, tokenHash, email string, expiresAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.admins[email]; !ok {
+		return ErrNotFound
+	}
+	r.adminSessions[tokenHash] = memoryAdminSession{email: email, expiresAt: expiresAt}
+	return nil
+}
+
+func (r *MemoryRepository) ValidAdminSession(_ context.Context, tokenHash string, now time.Time) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.adminSessions[tokenHash]
+	return ok && now.Before(session.expiresAt), nil
+}
+
+func (r *MemoryRepository) DeleteAdminSession(_ context.Context, tokenHash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.adminSessions, tokenHash)
+	return nil
 }
 
 func (r *MemoryRepository) ListScenarios(_ context.Context) ([]domain.Scenario, error) {

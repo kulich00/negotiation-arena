@@ -53,10 +53,10 @@ func (r ScenarioRules) WithDefaults() ScenarioRules {
 	if r.MaxTurns == 0 && r.MinimumTrustForAgreement == 0 && !r.RequiresInterestExploration && !r.RequiresEvidence && r.Proposal.Kind == "" && r.TrustScoreWeight == 0 && r.ArgumentScoreWeight == 0 && r.PressureScoreWeight == 0 {
 		return defaults
 	}
-	if r.MaxTurns <= 0 {
+	if r.MaxTurns == 0 {
 		r.MaxTurns = defaults.MaxTurns
 	}
-	if r.MinimumTrustForAgreement <= 0 {
+	if r.MinimumTrustForAgreement == 0 {
 		r.MinimumTrustForAgreement = defaults.MinimumTrustForAgreement
 	}
 	if r.Proposal.Kind == "" {
@@ -104,12 +104,13 @@ type Session struct {
 }
 
 type SessionState struct {
-	Phase             NegotiationPhase `json:"phase"`
-	InterestsExplored bool             `json:"interestsExplored"`
-	EvidencePresented bool             `json:"evidencePresented"`
-	OfferMade         bool             `json:"offerMade"`
-	OfferAccepted     bool             `json:"offerAccepted"`
-	LastOfferID       string           `json:"lastOfferId,omitempty"`
+	Phase               NegotiationPhase `json:"phase"`
+	InterestsExplored   bool             `json:"interestsExplored"`
+	EvidencePresented   bool             `json:"evidencePresented"`
+	OfferMade           bool             `json:"offerMade"`
+	OfferAccepted       bool             `json:"offerAccepted"`
+	LastOfferID         string           `json:"lastOfferId,omitempty"`
+	StructuredMovesUsed bool             `json:"structuredMovesUsed"`
 }
 
 type Result struct {

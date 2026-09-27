@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,6 +14,44 @@ import (
 type PostgresRepository struct{ db *pgxpool.Pool }
 
 func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db: db} }
+
+func (r *PostgresRepository) SetAdminPassword(ctx context.Context, email, passwordHash string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO admins (email,password_hash) VALUES ($1,$2)
+		ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash, updated_at=now()`, email, passwordHash); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM admin_sessions WHERE admin_email=$1`, email); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *PostgresRepository) AdminPasswordHash(ctx context.Context, email string) (string, error) {
+	var passwordHash string
+	err := r.db.QueryRow(ctx, `SELECT password_hash FROM admins WHERE email=$1`, email).Scan(&passwordHash)
+	return passwordHash, notFound(err)
+}
+
+func (r *PostgresRepository) SaveAdminSession(ctx context.Context, tokenHash, email string, expiresAt time.Time) error {
+	_, err := r.db.Exec(ctx, `INSERT INTO admin_sessions (token_hash,admin_email,expires_at) VALUES ($1,$2,$3)`, tokenHash, email, expiresAt)
+	return err
+}
+
+func (r *PostgresRepository) ValidAdminSession(ctx context.Context, tokenHash string, now time.Time) (bool, error) {
+	var valid bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM admin_sessions WHERE token_hash=$1 AND expires_at>$2)`, tokenHash, now).Scan(&valid)
+	return valid, err
+}
+
+func (r *PostgresRepository) DeleteAdminSession(ctx context.Context, tokenHash string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM admin_sessions WHERE token_hash=$1`, tokenHash)
+	return err
+}
 
 func (r *PostgresRepository) ListScenarios(ctx context.Context) ([]domain.Scenario, error) {
 	rows, err := r.db.Query(ctx, `SELECT id,title,sphere,topic,difficulty,opponent_role,opponent_tone,player_goal,opponent_goal,initial_message,rules FROM scenarios ORDER BY id`)

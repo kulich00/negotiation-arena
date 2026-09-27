@@ -2,10 +2,12 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/kulich00/negotiation-arena/backend/internal/adminauth"
 	"github.com/kulich00/negotiation-arena/backend/internal/database"
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
 	"github.com/kulich00/negotiation-arena/backend/internal/llm"
@@ -30,6 +32,29 @@ func TestPostgresPersistence(t *testing.T) {
 	defer pool.Close()
 
 	repo := repository.NewPostgresRepository(pool)
+	adminEmail := "integration-" + time.Now().Format("20060102150405.000000000") + "@example.com"
+	defer func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM admins WHERE email=$1`, adminEmail)
+	}()
+	authService := adminauth.NewService(repo, time.Minute)
+	if err := authService.Bootstrap(ctx, adminEmail, "integration-password"); err != nil {
+		t.Fatal(err)
+	}
+	adminSession, err := authService.Login(ctx, adminEmail, "integration-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedAuth := adminauth.NewService(repository.NewPostgresRepository(pool), time.Minute)
+	if err := reopenedAuth.Authenticate(ctx, adminSession.Token); err != nil {
+		t.Fatalf("persisted admin session is invalid: %v", err)
+	}
+	if err := reopenedAuth.Logout(ctx, adminSession.Token); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopenedAuth.Authenticate(ctx, adminSession.Token); !errors.Is(err, adminauth.ErrInvalidToken) {
+		t.Fatalf("expected revoked admin session, got %v", err)
+	}
+
 	seedService := negotiation.NewService(repo, llm.NewMockProvider())
 	if err := seedService.SeedDefaults(ctx); err != nil {
 		t.Fatal(err)
@@ -60,18 +85,33 @@ func TestPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := service.ProcessMessage(ctx, session.ID, "Какие условия возможны?")
+	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
+		Content: "Какие условия возможны?",
+		Intent:  negotiation.IntentAskInterest,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := turn.Session
-	updated.Turn++
-	updated.State.Phase = domain.PhaseBargaining
-	updated.State.InterestsExplored = true
-	updated.State.EvidencePresented = true
-	updated.State.OfferMade = true
-	updated.State.LastOfferID = "review_later"
-	if err := repo.ApplyTurn(ctx, updated, turn.Session.Turn, "Предлагаю пересмотр через три месяца", "Это можно обсудить"); err != nil {
+	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
+		Content: "Показатели за квартал выросли.",
+		Intent:  negotiation.IntentPresentEvidence,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
+		Content:  "Предлагаю пересмотреть условия позже.",
+		Intent:   negotiation.IntentPropose,
+		Proposal: &negotiation.MoveProposal{AlternativeID: "review_later"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
+		Content: "Согласен с этим вариантом.",
+		Intent:  negotiation.IntentAccept,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Finish(ctx, session.ID)
@@ -91,14 +131,14 @@ func TestPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedSession.Status != "finished" || loadedSession.Turn != 2 || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.InterestsExplored || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || loadedSession.State.LastOfferID != "review_later" {
+	if loadedSession.Status != "finished" || loadedSession.Turn != 4 || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.StructuredMovesUsed || !loadedSession.State.InterestsExplored || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || !loadedSession.State.OfferAccepted || loadedSession.State.LastOfferID != "review_later" {
 		t.Fatalf("unexpected session: %+v", loadedSession)
 	}
 	messages, err := reopened.Messages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 5 || messages[0].Content != scenario.InitialMessage || messages[1].Content != "Какие условия возможны?" {
+	if len(messages) != 9 || messages[0].Content != scenario.InitialMessage || messages[1].Content != "Какие условия возможны?" {
 		t.Fatalf("unexpected messages: %+v", messages)
 	}
 	loadedResult, err := reopened.Result(ctx, session.ID)
@@ -107,5 +147,8 @@ func TestPostgresPersistence(t *testing.T) {
 	}
 	if loadedResult.FinalScore != result.FinalScore {
 		t.Fatalf("unexpected result: %+v", loadedResult)
+	}
+	if loadedResult.Outcome != "Компромисс" {
+		t.Fatalf("unexpected outcome: %+v", loadedResult)
 	}
 }

@@ -47,10 +47,17 @@ async function login() {
   }
 }
 
-function logout() {
+async function logout() {
+  const currentToken = token.value
   token.value = ''
+  error.value = ''
   localStorage.removeItem('admin_token')
-  status.value = 'Вы вышли из системы'
+  try {
+    await api.logout(currentToken)
+    status.value = 'Вы вышли из системы'
+  } catch (err) {
+    error.value = err.message || 'Не удалось отозвать сессию'
+  }
 }
 
 async function createScenario() {

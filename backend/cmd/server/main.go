@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kulich00/negotiation-arena/backend/internal/adminauth"
 	"github.com/kulich00/negotiation-arena/backend/internal/config"
 	"github.com/kulich00/negotiation-arena/backend/internal/database"
 	"github.com/kulich00/negotiation-arena/backend/internal/httpapi"
@@ -32,7 +33,7 @@ func main() {
 		defer db.Close()
 	}
 
-	var repo repository.Repository = repository.NewMemoryRepository()
+	var repo repository.AppRepository = repository.NewMemoryRepository()
 	if db != nil {
 		if err := database.Migrate(ctx, cfg.DatabaseURL); err != nil {
 			logger.Error("database migration failed", "error", err)
@@ -45,8 +46,13 @@ func main() {
 		logger.Error("scenario initialization failed", "error", err)
 		os.Exit(1)
 	}
+	authService := adminauth.NewService(repo, cfg.AdminSessionTTL)
+	if err := authService.Bootstrap(ctx, cfg.AdminEmail, cfg.AdminPassword); err != nil {
+		logger.Error("admin initialization failed", "error", err)
+		os.Exit(1)
+	}
 
-	handler := httpapi.NewHandler(service, db, cfg, logger)
+	handler := httpapi.NewHandler(service, authService, db, logger)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler.Router(webapp.Handler()),
