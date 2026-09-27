@@ -33,7 +33,8 @@ func TestMemoryRepositoryPreservesRulesAndState(t *testing.T) {
 	session.Turn = 1
 	session.State.Phase = domain.PhaseExploration
 	session.State.InterestsExplored = true
-	if err := repo.ApplyTurn(ctx, session, 0, "Какие интересы?", "Обсудим бюджет"); err != nil {
+	analysis := domain.TurnAnalysis{Intent: "ask_interest", Technique: "harvard_interests", Strengths: []string{"Открытый вопрос"}, Risks: []string{}}
+	if err := repo.ApplyTurn(ctx, session, 0, "Какие интересы?", "Обсудим бюджет", analysis); err != nil {
 		t.Fatal(err)
 	}
 	loadedSession, err := repo.Session(ctx, session.ID)
@@ -42,5 +43,20 @@ func TestMemoryRepositoryPreservesRulesAndState(t *testing.T) {
 	}
 	if loadedSession.State.Phase != domain.PhaseExploration || !loadedSession.State.InterestsExplored {
 		t.Fatalf("state was not saved: %+v", loadedSession.State)
+	}
+	messages, err := repo.Messages(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 || messages[1].Analysis == nil || messages[1].Analysis.Technique != "harvard_interests" || messages[2].Analysis != nil {
+		t.Fatalf("analysis was not saved on the player message: %+v", messages)
+	}
+	messages[1].Analysis.Strengths[0] = "changed"
+	reloadedMessages, err := repo.Messages(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedMessages[1].Analysis.Strengths[0] != "Открытый вопрос" {
+		t.Fatal("stored message analysis was mutated through returned data")
 	}
 }

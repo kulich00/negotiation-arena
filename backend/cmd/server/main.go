@@ -46,7 +46,11 @@ func main() {
 		logger.Error("scenario initialization failed", "error", err)
 		os.Exit(1)
 	}
-	authService := adminauth.NewService(repo, cfg.AdminSessionTTL)
+	authService := adminauth.NewService(repo, adminauth.Config{
+		SessionTTL:       cfg.AdminSessionTTL,
+		MaxLoginAttempts: cfg.AdminLoginMaxAttempts,
+		LoginWindow:      cfg.AdminLoginWindow,
+	})
 	if err := authService.Bootstrap(ctx, cfg.AdminEmail, cfg.AdminPassword); err != nil {
 		logger.Error("admin initialization failed", "error", err)
 		os.Exit(1)

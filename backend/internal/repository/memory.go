@@ -85,6 +85,17 @@ func (r *MemoryRepository) DeleteAdminSession(_ context.Context, tokenHash strin
 	return nil
 }
 
+func (r *MemoryRepository) DeleteExpiredAdminSessions(_ context.Context, now time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for tokenHash, session := range r.adminSessions {
+		if !now.Before(session.expiresAt) {
+			delete(r.adminSessions, tokenHash)
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepository) ListScenarios(_ context.Context) ([]domain.Scenario, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -101,6 +112,48 @@ func (r *MemoryRepository) SaveScenario(_ context.Context, scenario domain.Scena
 	defer r.mu.Unlock()
 	scenario.Rules = scenario.Rules.WithDefaults()
 	r.scenarios[scenario.ID] = cloneScenario(scenario)
+	return nil
+}
+
+func (r *MemoryRepository) CreateScenario(_ context.Context, scenario domain.Scenario) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.scenarios[scenario.ID]; exists {
+		return ErrConflict
+	}
+	scenario.Rules = scenario.Rules.WithDefaults()
+	r.scenarios[scenario.ID] = cloneScenario(scenario)
+	return nil
+}
+
+func (r *MemoryRepository) UpdateScenario(_ context.Context, scenario domain.Scenario) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.scenarios[scenario.ID]; !exists {
+		return ErrNotFound
+	}
+	for _, session := range r.sessions {
+		if session.ScenarioID == scenario.ID && session.Status == "active" {
+			return ErrConflict
+		}
+	}
+	scenario.Rules = scenario.Rules.WithDefaults()
+	r.scenarios[scenario.ID] = cloneScenario(scenario)
+	return nil
+}
+
+func (r *MemoryRepository) DeleteScenario(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.scenarios[id]; !exists {
+		return ErrNotFound
+	}
+	for _, session := range r.sessions {
+		if session.ScenarioID == id {
+			return ErrConflict
+		}
+	}
+	delete(r.scenarios, id)
 	return nil
 }
 
@@ -135,7 +188,7 @@ func (r *MemoryRepository) Session(_ context.Context, id string) (domain.Session
 	return item, nil
 }
 
-func (r *MemoryRepository) ApplyTurn(_ context.Context, session domain.Session, expectedTurn int, message, reply string) error {
+func (r *MemoryRepository) ApplyTurn(_ context.Context, session domain.Session, expectedTurn int, message, reply string, analysis domain.TurnAnalysis) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, ok := r.sessions[session.ID]
@@ -146,7 +199,8 @@ func (r *MemoryRepository) ApplyTurn(_ context.Context, session domain.Session, 
 		return ErrConflict
 	}
 	r.sessions[session.ID] = session
-	r.messages[session.ID] = append(r.messages[session.ID], domain.Message{Sender: "player", Content: message}, domain.Message{Sender: "opponent", Content: reply})
+	analysis = cloneTurnAnalysis(analysis)
+	r.messages[session.ID] = append(r.messages[session.ID], domain.Message{Sender: "player", Content: message, Analysis: &analysis}, domain.Message{Sender: "opponent", Content: reply})
 	return nil
 }
 
@@ -156,7 +210,15 @@ func (r *MemoryRepository) Messages(_ context.Context, id string) ([]domain.Mess
 	if _, ok := r.sessions[id]; !ok {
 		return nil, ErrNotFound
 	}
-	return append([]domain.Message{}, r.messages[id]...), nil
+	items := make([]domain.Message, len(r.messages[id]))
+	for index, message := range r.messages[id] {
+		items[index] = message
+		if message.Analysis != nil {
+			analysis := cloneTurnAnalysis(*message.Analysis)
+			items[index].Analysis = &analysis
+		}
+	}
+	return items, nil
 }
 
 func (r *MemoryRepository) Finish(_ context.Context, session domain.Session, result domain.Result) error {
@@ -187,4 +249,10 @@ func (r *MemoryRepository) Result(_ context.Context, sessionID string) (domain.R
 func cloneScenario(s domain.Scenario) domain.Scenario {
 	s.Rules.Proposal.AlternativeIDs = append([]string{}, s.Rules.Proposal.AlternativeIDs...)
 	return s
+}
+
+func cloneTurnAnalysis(analysis domain.TurnAnalysis) domain.TurnAnalysis {
+	analysis.Strengths = append([]string{}, analysis.Strengths...)
+	analysis.Risks = append([]string{}, analysis.Risks...)
+	return analysis
 }

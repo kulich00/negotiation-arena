@@ -67,6 +67,67 @@ func TestCreateScenarioNormalizesAndAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestScenarioManagementLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
+	scenario := validScenarioFixture()
+	created, err := service.CreateScenario(ctx, scenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateScenario(ctx, scenario); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate conflict, got %v", err)
+	}
+
+	updatedInput := created
+	updatedInput.ID = ""
+	updatedInput.Title = "  Updated scenario  "
+	updated, err := service.UpdateScenario(ctx, created.ID, updatedInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != created.ID || updated.Title != "Updated scenario" {
+		t.Fatalf("unexpected updated scenario: %+v", updated)
+	}
+	updatedInput.ID = "different-id"
+	if _, err := service.UpdateScenario(ctx, created.ID, updatedInput); !errors.Is(err, ErrInvalidScenario) {
+		t.Fatalf("expected id mismatch validation error, got %v", err)
+	}
+
+	session, err := service.StartSession(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedInput.ID = created.ID
+	if _, err := service.UpdateScenario(ctx, created.ID, updatedInput); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected active-session update conflict, got %v", err)
+	}
+	if err := service.DeleteScenario(ctx, created.ID); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected used-scenario delete conflict, got %v", err)
+	}
+	if _, err := service.Finish(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateScenario(ctx, created.ID, updatedInput); err != nil {
+		t.Fatalf("expected update after session finish, got %v", err)
+	}
+}
+
+func TestDeleteUnusedScenario(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
+	scenario := validScenarioFixture()
+	if _, err := service.CreateScenario(ctx, scenario); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteScenario(ctx, scenario.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteScenario(ctx, scenario.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected not found after deletion, got %v", err)
+	}
+}
+
 func validScenarioFixture() domain.Scenario {
 	return domain.Scenario{
 		ID:             "valid-scenario",

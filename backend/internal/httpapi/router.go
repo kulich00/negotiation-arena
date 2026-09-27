@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -43,9 +44,12 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/v1/sessions/{id}/result", h.getResult)
 	mux.HandleFunc("POST /api/v1/admin/login", h.login)
 	mux.HandleFunc("POST /api/v1/admin/logout", h.logout)
+	mux.HandleFunc("GET /api/v1/admin/scenarios", h.listAdminScenarios)
 	mux.HandleFunc("POST /api/v1/admin/scenarios", h.createScenario)
+	mux.HandleFunc("PUT /api/v1/admin/scenarios/{id}", h.updateScenario)
+	mux.HandleFunc("DELETE /api/v1/admin/scenarios/{id}", h.deleteScenario)
 	mux.Handle("/", static)
-	return h.recover(h.logRequests(mux))
+	return h.recover(h.securityHeaders(h.logRequests(mux)))
 }
 
 func (h *Handler) listScenarios(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +177,7 @@ func (h *Handler) getResult(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -181,6 +186,16 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, err := h.auth.Login(r.Context(), body.Email, body.Password)
+	var rateLimitError *adminauth.RateLimitError
+	if errors.As(err, &rateLimitError) {
+		retryAfter := int((rateLimitError.RetryAfter + time.Second - 1) / time.Second)
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+		writeError(w, http.StatusTooManyRequests, "too many login attempts")
+		return
+	}
 	if errors.Is(err, adminauth.ErrInvalidCredentials) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -193,6 +208,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if err := h.auth.Logout(r.Context(), bearerToken(r.Header.Get("Authorization"))); err != nil {
 		writeError(w, http.StatusInternalServerError, "authentication unavailable")
 		return
@@ -201,12 +217,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createScenario(w http.ResponseWriter, r *http.Request) {
-	token := bearerToken(r.Header.Get("Authorization"))
-	if err := h.auth.Authenticate(r.Context(), token); errors.Is(err, adminauth.ErrInvalidToken) {
-		writeError(w, http.StatusUnauthorized, "invalid token")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "authentication unavailable")
+	if !h.authorizeAdmin(w, r) {
 		return
 	}
 	var scenario domain.Scenario
@@ -215,14 +226,92 @@ func (h *Handler) createScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := h.service.CreateScenario(r.Context(), scenario)
 	if err != nil {
-		if errors.Is(err, negotiation.ErrInvalidScenario) {
+		switch {
+		case errors.Is(err, negotiation.ErrInvalidScenario):
 			writeError(w, http.StatusBadRequest, err.Error())
-			return
+		case errors.Is(err, repository.ErrConflict):
+			writeError(w, http.StatusConflict, "scenario already exists")
+		default:
+			writeError(w, http.StatusInternalServerError, "could not save scenario")
 		}
-		writeError(w, http.StatusInternalServerError, "could not save scenario")
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (h *Handler) listAdminScenarios(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	scenarios, err := h.service.ListScenarios(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load scenarios")
+		return
+	}
+	writeJSON(w, http.StatusOK, scenarios)
+}
+
+func (h *Handler) updateScenario(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	var scenario domain.Scenario
+	if !decode(w, r, &scenario) {
+		return
+	}
+	updated, err := h.service.UpdateScenario(r.Context(), r.PathValue("id"), scenario)
+	if err != nil {
+		switch {
+		case errors.Is(err, negotiation.ErrInvalidScenario):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "scenario not found")
+		case errors.Is(err, repository.ErrConflict):
+			writeError(w, http.StatusConflict, "scenario has active sessions")
+		default:
+			writeError(w, http.StatusInternalServerError, "could not update scenario")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) deleteScenario(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	err := h.service.DeleteScenario(r.Context(), r.PathValue("id"))
+	if err != nil {
+		switch {
+		case errors.Is(err, negotiation.ErrInvalidScenario):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "scenario not found")
+		case errors.Is(err, repository.ErrConflict):
+			writeError(w, http.StatusConflict, "scenario has negotiation sessions")
+		default:
+			writeError(w, http.StatusInternalServerError, "could not delete scenario")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) authorizeAdmin(w http.ResponseWriter, r *http.Request) bool {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.auth == nil {
+		writeError(w, http.StatusInternalServerError, "authentication unavailable")
+		return false
+	}
+	token := bearerToken(r.Header.Get("Authorization"))
+	if err := h.auth.Authenticate(r.Context(), token); errors.Is(err, adminauth.ErrInvalidToken) {
+		writeError(w, http.StatusUnauthorized, "invalid token")
+		return false
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "authentication unavailable")
+		return false
+	}
+	return true
 }
 
 func bearerToken(header string) string {
@@ -274,6 +363,18 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(w, r)
 		h.logger.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+	})
+}
+
+func (h *Handler) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
 	})
 }
 

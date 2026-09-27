@@ -36,15 +36,26 @@ func TestPostgresPersistence(t *testing.T) {
 	defer func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM admins WHERE email=$1`, adminEmail)
 	}()
-	authService := adminauth.NewService(repo, time.Minute)
+	authConfig := adminauth.Config{SessionTTL: time.Minute, MaxLoginAttempts: 5, LoginWindow: time.Minute}
+	authService := adminauth.NewService(repo, authConfig)
 	if err := authService.Bootstrap(ctx, adminEmail, "integration-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveAdminSession(ctx, "expired-integration-token", adminEmail, time.Now().UTC().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	adminSession, err := authService.Login(ctx, adminEmail, "integration-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	reopenedAuth := adminauth.NewService(repository.NewPostgresRepository(pool), time.Minute)
+	var expiredSessions int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM admin_sessions WHERE token_hash='expired-integration-token'`).Scan(&expiredSessions); err != nil {
+		t.Fatal(err)
+	}
+	if expiredSessions != 0 {
+		t.Fatalf("expired admin sessions were not deleted")
+	}
+	reopenedAuth := adminauth.NewService(repository.NewPostgresRepository(pool), authConfig)
 	if err := reopenedAuth.Authenticate(ctx, adminSession.Token); err != nil {
 		t.Fatalf("persisted admin session is invalid: %v", err)
 	}
@@ -73,7 +84,19 @@ func TestPostgresPersistence(t *testing.T) {
 	rules := domain.DefaultScenarioRules()
 	rules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", MaximumValue: 7, AlternativeIDs: []string{"review_later"}}
 	scenario := domain.Scenario{ID: "integration-" + time.Now().Format("20060102150405.000000000"), Title: "Integration", InitialMessage: "Начнём переговоры", Rules: rules}
-	if err := repo.SaveScenario(ctx, scenario); err != nil {
+	originalInitialMessage := scenario.InitialMessage
+	if err := repo.CreateScenario(ctx, scenario); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateScenario(ctx, scenario); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate scenario conflict, got %v", err)
+	}
+	deletableScenario := scenario
+	deletableScenario.ID += "-deletable"
+	if err := repo.CreateScenario(ctx, deletableScenario); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteScenario(ctx, deletableScenario.ID); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -84,6 +107,13 @@ func TestPostgresPersistence(t *testing.T) {
 	session, err := service.StartSession(ctx, scenario.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	scenario.Title = "Updated integration scenario"
+	if err := repo.UpdateScenario(ctx, scenario); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected active-session update conflict, got %v", err)
+	}
+	if err := repo.DeleteScenario(ctx, scenario.ID); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected used-scenario delete conflict, got %v", err)
 	}
 	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
 		Content: "Какие условия возможны?",
@@ -118,6 +148,10 @@ func TestPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	scenario.InitialMessage = "Updated introduction"
+	if err := repo.UpdateScenario(ctx, scenario); err != nil {
+		t.Fatalf("expected update after session finish, got %v", err)
+	}
 
 	reopened := repository.NewPostgresRepository(pool)
 	loadedScenario, err := reopened.Scenario(ctx, scenario.ID)
@@ -131,15 +165,18 @@ func TestPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedSession.Status != "finished" || loadedSession.Turn != 4 || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.StructuredMovesUsed || !loadedSession.State.InterestsExplored || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || !loadedSession.State.OfferAccepted || loadedSession.State.LastOfferID != "review_later" {
+	if loadedSession.Status != "finished" || loadedSession.Turn != 4 || loadedSession.InitialMessage != originalInitialMessage || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.StructuredMovesUsed || !loadedSession.State.InterestsExplored || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || !loadedSession.State.OfferAccepted || loadedSession.State.LastOfferID != "review_later" {
 		t.Fatalf("unexpected session: %+v", loadedSession)
 	}
 	messages, err := reopened.Messages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 9 || messages[0].Content != scenario.InitialMessage || messages[1].Content != "Какие условия возможны?" {
+	if len(messages) != 9 || messages[0].Content != originalInitialMessage || messages[1].Content != "Какие условия возможны?" {
 		t.Fatalf("unexpected messages: %+v", messages)
+	}
+	if messages[1].Analysis == nil || messages[1].Analysis.Technique != "harvard_interests" || messages[2].Analysis != nil || messages[7].Analysis == nil || messages[7].Analysis.Technique != "agreement_confirmation" {
+		t.Fatalf("turn analysis was not persisted correctly: %+v", messages)
 	}
 	loadedResult, err := reopened.Result(ctx, session.ID)
 	if err != nil {

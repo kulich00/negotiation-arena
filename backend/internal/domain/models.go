@@ -123,6 +123,19 @@ type Result struct {
 }
 
 type Message struct {
-	Sender  string `json:"sender"`
-	Content string `json:"content"`
+	Sender   string        `json:"sender"`
+	Content  string        `json:"content"`
+	Analysis *TurnAnalysis `json:"analysis,omitempty"`
+}
+
+type TurnAnalysis struct {
+	Intent         string   `json:"intent"`
+	Technique      string   `json:"technique"`
+	TrustDelta     int      `json:"trustDelta"`
+	ArgumentDelta  int      `json:"argumentDelta"`
+	PressureDelta  int      `json:"pressureDelta"`
+	Summary        string   `json:"summary"`
+	Strengths      []string `json:"strengths"`
+	Risks          []string `json:"risks"`
+	Recommendation string   `json:"recommendation"`
 }

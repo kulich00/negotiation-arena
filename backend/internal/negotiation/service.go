@@ -19,8 +19,9 @@ type Service struct {
 }
 
 type TurnResult struct {
-	Reply   string         `json:"reply"`
-	Session domain.Session `json:"session"`
+	Reply    string              `json:"reply"`
+	Session  domain.Session      `json:"session"`
+	Analysis domain.TurnAnalysis `json:"analysis"`
 }
 
 func NewService(repo repository.Repository, provider llm.Provider) *Service {
@@ -53,7 +54,29 @@ func (s *Service) CreateScenario(ctx context.Context, scenario domain.Scenario) 
 	if err := ValidateScenario(scenario); err != nil {
 		return domain.Scenario{}, err
 	}
-	return scenario, s.repo.SaveScenario(ctx, scenario)
+	return scenario, s.repo.CreateScenario(ctx, scenario)
+}
+
+func (s *Service) UpdateScenario(ctx context.Context, id string, scenario domain.Scenario) (domain.Scenario, error) {
+	id = strings.TrimSpace(id)
+	scenario = normalizeScenario(scenario)
+	if scenario.ID != "" && scenario.ID != id {
+		return domain.Scenario{}, invalidScenario("id must match the request path")
+	}
+	scenario.ID = id
+	scenario.Rules = scenario.Rules.WithDefaults()
+	if err := ValidateScenario(scenario); err != nil {
+		return domain.Scenario{}, err
+	}
+	return scenario, s.repo.UpdateScenario(ctx, scenario)
+}
+
+func (s *Service) DeleteScenario(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return invalidScenario("id is required")
+	}
+	return s.repo.DeleteScenario(ctx, id)
 }
 
 func (s *Service) StartSession(ctx context.Context, scenarioID string) (domain.Session, error) {
@@ -104,6 +127,7 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	var (
 		evaluation MoveEvaluation
 		reply      string
+		analysis   domain.TurnAnalysis
 	)
 	if move != nil {
 		if err := ValidateMove(*move, scenario.Rules); err != nil {
@@ -114,15 +138,17 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 		}
 		evaluation = EvaluateMove(*move, session.State)
 		reply = GenerateOpponentReply(*move, session, scenario.Rules, evaluation)
+		analysis = AnalyzeStructuredMove(*move, session.State, scenario.Rules, evaluation)
 	} else {
-		analysis, err := s.provider.Analyze(ctx, llm.AnalysisRequest{Message: message, Turn: session.Turn, TrustScore: session.TrustScore, ArgumentScore: session.ArgumentScore})
+		providerAnalysis, err := s.provider.Analyze(ctx, llm.AnalysisRequest{Message: message, Turn: session.Turn, TrustScore: session.TrustScore, ArgumentScore: session.ArgumentScore})
 		if err != nil {
 			return TurnResult{}, err
 		}
-		reply = analysis.Reply
-		evaluation.TrustDelta = analysis.TrustDelta
-		evaluation.ArgumentDelta = analysis.ArgumentDelta
-		evaluation.PressureDelta = analysis.PressureDelta
+		reply = providerAnalysis.Reply
+		evaluation.TrustDelta = providerAnalysis.TrustDelta
+		evaluation.ArgumentDelta = providerAnalysis.ArgumentDelta
+		evaluation.PressureDelta = providerAnalysis.PressureDelta
+		analysis = AnalyzeLegacyMove(providerAnalysis)
 	}
 	expectedTurn := session.Turn
 	session.Turn++
@@ -132,10 +158,10 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	if move != nil {
 		session.State = evaluation.State
 	}
-	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, reply); err != nil {
+	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, reply, analysis); err != nil {
 		return TurnResult{}, err
 	}
-	return TurnResult{Reply: reply, Session: session}, nil
+	return TurnResult{Reply: reply, Session: session, Analysis: analysis}, nil
 }
 
 func (s *Service) Finish(ctx context.Context, sessionID string) (domain.Result, error) {

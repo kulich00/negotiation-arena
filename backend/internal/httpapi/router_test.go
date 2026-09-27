@@ -51,6 +51,31 @@ func TestScenarioListOmitsPrivateRules(t *testing.T) {
 	}
 }
 
+func TestSecurityHeaders(t *testing.T) {
+	service := negotiation.NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
+	router := NewHandler(service, nil, nil, slog.Default()).Router(http.NotFoundHandler())
+	request := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+	expected := map[string]string{
+		"Content-Security-Policy":    "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+		"Cross-Origin-Opener-Policy": "same-origin",
+		"Permissions-Policy":         "camera=(), microphone=(), geolocation=()",
+		"Referrer-Policy":            "no-referrer",
+		"X-Content-Type-Options":     "nosniff",
+		"X-Frame-Options":            "DENY",
+	}
+	for header, value := range expected {
+		if response.Header().Get(header) != value {
+			t.Errorf("%s = %q, want %q", header, response.Header().Get(header), value)
+		}
+	}
+}
+
 func TestProcessStructuredMove(t *testing.T) {
 	service := negotiation.NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
 	if err := service.SeedDefaults(context.Background()); err != nil {
@@ -73,6 +98,9 @@ func TestProcessStructuredMove(t *testing.T) {
 	}
 	if turn.Session.TrustScore != 52 || !turn.Session.State.InterestsExplored {
 		t.Fatalf("structured move was not evaluated: %+v", turn.Session)
+	}
+	if turn.Analysis.Technique != "harvard_interests" || turn.Analysis.TrustDelta != 2 {
+		t.Fatalf("structured move analysis is missing: %+v", turn.Analysis)
 	}
 	if turn.Reply != "Для меня важно снизить риски и понять взаимную выгоду. Какие варианты вы предлагаете?" {
 		t.Fatalf("unexpected deterministic reply: %q", turn.Reply)
@@ -231,10 +259,92 @@ func TestCreateScenarioAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestAdminScenarioManagement(t *testing.T) {
+	ctx := context.Background()
+	repo := repository.NewMemoryRepository()
+	service := negotiation.NewService(repo, llm.NewMockProvider())
+	authService, token := newTestAdminAuth(t, repo)
+	router := NewHandler(service, authService, nil, slog.Default()).Router(http.NotFoundHandler())
+
+	adminRequest := func(method, path string, value any) *httptest.ResponseRecorder {
+		var body []byte
+		if value != nil {
+			var err error
+			body, err = json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		request := httptest.NewRequest(method, path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+
+	scenario := validHTTPScenario("managed-scenario")
+	if response := adminRequest(http.MethodPost, "/api/v1/admin/scenarios", scenario); response.Code != http.StatusCreated {
+		t.Fatalf("create status %d: %s", response.Code, response.Body.String())
+	}
+	if response := adminRequest(http.MethodPost, "/api/v1/admin/scenarios", scenario); response.Code != http.StatusConflict {
+		t.Fatalf("duplicate status %d: %s", response.Code, response.Body.String())
+	}
+
+	listResponse := adminRequest(http.MethodGet, "/api/v1/admin/scenarios", nil)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list status %d: %s", listResponse.Code, listResponse.Body.String())
+	}
+	var scenarios []domain.Scenario
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &scenarios); err != nil {
+		t.Fatal(err)
+	}
+	if len(scenarios) != 1 || scenarios[0].OpponentGoal == "" || scenarios[0].Rules.MaxTurns == 0 {
+		t.Fatalf("admin list omitted private fields: %+v", scenarios)
+	}
+
+	scenario.ID = ""
+	scenario.Title = "Updated through API"
+	updateResponse := adminRequest(http.MethodPut, "/api/v1/admin/scenarios/managed-scenario", scenario)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("update status %d: %s", updateResponse.Code, updateResponse.Body.String())
+	}
+	var updated domain.Scenario
+	if err := json.Unmarshal(updateResponse.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != "managed-scenario" || updated.Title != "Updated through API" {
+		t.Fatalf("unexpected update response: %+v", updated)
+	}
+
+	if _, err := service.StartSession(ctx, updated.ID); err != nil {
+		t.Fatal(err)
+	}
+	if response := adminRequest(http.MethodPut, "/api/v1/admin/scenarios/managed-scenario", scenario); response.Code != http.StatusConflict {
+		t.Fatalf("active update status %d: %s", response.Code, response.Body.String())
+	}
+	if response := adminRequest(http.MethodDelete, "/api/v1/admin/scenarios/managed-scenario", nil); response.Code != http.StatusConflict {
+		t.Fatalf("used delete status %d: %s", response.Code, response.Body.String())
+	}
+
+	deletable := validHTTPScenario("deletable-scenario")
+	if response := adminRequest(http.MethodPost, "/api/v1/admin/scenarios", deletable); response.Code != http.StatusCreated {
+		t.Fatalf("second create status %d: %s", response.Code, response.Body.String())
+	}
+	if response := adminRequest(http.MethodDelete, "/api/v1/admin/scenarios/deletable-scenario", nil); response.Code != http.StatusNoContent {
+		t.Fatalf("delete status %d: %s", response.Code, response.Body.String())
+	}
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/admin/scenarios", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized list status %d: %s", unauthorized.Code, unauthorized.Body.String())
+	}
+}
+
 func TestAdminLoginAndLogout(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	service := negotiation.NewService(repo, llm.NewMockProvider())
-	authService := adminauth.NewService(repo, time.Hour)
+	authService := newAdminAuthService(repo, time.Hour)
 	if err := authService.Bootstrap(context.Background(), "admin@example.com", "correct-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -266,9 +376,41 @@ func TestAdminLoginAndLogout(t *testing.T) {
 	}
 }
 
+func TestAdminLoginRateLimit(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	service := negotiation.NewService(repo, llm.NewMockProvider())
+	authService := adminauth.NewService(repo, adminauth.Config{
+		SessionTTL:       time.Hour,
+		MaxLoginAttempts: 1,
+		LoginWindow:      time.Minute,
+	})
+	if err := authService.Bootstrap(context.Background(), "admin@example.com", "correct-password"); err != nil {
+		t.Fatal(err)
+	}
+	router := NewHandler(service, authService, nil, slog.Default()).Router(http.NotFoundHandler())
+
+	request := func(password string) *httptest.ResponseRecorder {
+		body := strings.NewReader(`{"email":"admin@example.com","password":"` + password + `"}`)
+		httpRequest := httptest.NewRequest(http.MethodPost, "/api/v1/admin/login", body)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httpRequest)
+		return response
+	}
+	if response := request("wrong-password"); response.Code != http.StatusUnauthorized {
+		t.Fatalf("first login status %d: %s", response.Code, response.Body.String())
+	}
+	response := request("correct-password")
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("limited login status %d: %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Retry-After") == "" || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("missing rate-limit headers: %+v", response.Header())
+	}
+}
+
 func newTestAdminAuth(t *testing.T, repo *repository.MemoryRepository) (*adminauth.Service, string) {
 	t.Helper()
-	service := adminauth.NewService(repo, time.Hour)
+	service := newAdminAuthService(repo, time.Hour)
 	if err := service.Bootstrap(context.Background(), "admin@example.com", "correct-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +419,29 @@ func newTestAdminAuth(t *testing.T, repo *repository.MemoryRepository) (*adminau
 		t.Fatal(err)
 	}
 	return service, session.Token
+}
+
+func newAdminAuthService(repo repository.AdminRepository, sessionTTL time.Duration) *adminauth.Service {
+	return adminauth.NewService(repo, adminauth.Config{
+		SessionTTL:       sessionTTL,
+		MaxLoginAttempts: 5,
+		LoginWindow:      15 * time.Minute,
+	})
+}
+
+func validHTTPScenario(id string) domain.Scenario {
+	return domain.Scenario{
+		ID:             id,
+		Title:          "Project negotiation",
+		Sphere:         "IT",
+		Topic:          "Delivery date",
+		Difficulty:     "medium",
+		OpponentRole:   "Customer",
+		OpponentTone:   "Demanding",
+		PlayerGoal:     "Agree on a realistic date",
+		OpponentGoal:   "Reduce delivery risk",
+		InitialMessage: "Why should the deadline change?",
+	}
 }
 
 func startTestSession(t *testing.T, handler http.Handler, scenarioID string) string {

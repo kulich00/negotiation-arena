@@ -51,6 +51,9 @@ func TestNegotiationFlow(t *testing.T) {
 	if turn.Session.TrustScore <= 50 {
 		t.Fatalf("expected trust to grow, got %d", turn.Session.TrustScore)
 	}
+	if turn.Analysis.Intent != "legacy" || turn.Analysis.Technique == "" || turn.Analysis.Summary == "" {
+		t.Fatalf("missing legacy turn analysis: %+v", turn.Analysis)
+	}
 	result, err := service.Finish(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +90,9 @@ func TestProcessMovePersistsDeterministicState(t *testing.T) {
 	if turn.Session.TrustScore != 52 || !turn.Session.State.InterestsExplored || turn.Session.State.Phase != domain.PhaseExploration {
 		t.Fatalf("unexpected session after structured move: %+v", turn.Session)
 	}
+	if turn.Analysis.Technique != "harvard_interests" || turn.Analysis.TrustDelta != 2 {
+		t.Fatalf("unexpected structured analysis: %+v", turn.Analysis)
+	}
 
 	turn, err = service.ProcessMove(context.Background(), session.ID, PlayerMove{
 		Content: "Результаты за квартал выросли на 20%.",
@@ -110,6 +116,21 @@ func TestProcessMovePersistsDeterministicState(t *testing.T) {
 	}
 	if !turn.Session.State.OfferAccepted {
 		t.Fatalf("accepted offer was not persisted: %+v", turn.Session.State)
+	}
+	messages, err := service.Messages(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 9 {
+		t.Fatalf("unexpected message count: %d", len(messages))
+	}
+	for index, message := range messages {
+		if message.Sender == "player" && (message.Analysis == nil || message.Analysis.Technique == "") {
+			t.Fatalf("player message %d has no analysis: %+v", index, message)
+		}
+		if message.Sender == "opponent" && message.Analysis != nil {
+			t.Fatalf("opponent message %d unexpectedly has analysis: %+v", index, message)
+		}
 	}
 
 	result, err := service.Finish(context.Background(), session.ID)
