@@ -176,7 +176,13 @@ func (s *Service) Finish(ctx context.Context, sessionID string) (domain.Result, 
 	if err != nil {
 		return domain.Result{}, err
 	}
+	messages, err := s.repo.Messages(ctx, sessionID)
+	if err != nil {
+		return domain.Result{}, err
+	}
 	result := EvaluateResult(session, scenario.Rules)
+	result.Analysis = AggregateSessionAnalysis(messages)
+	EnrichResultWithSessionAnalysis(&result)
 	session.Status = "finished"
 	session.State.Phase = domain.PhaseFinished
 	if err := s.repo.Finish(ctx, session, result); err != nil {

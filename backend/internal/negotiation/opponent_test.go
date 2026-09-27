@@ -77,6 +77,57 @@ func TestGenerateOpponentReplyByIntent(t *testing.T) {
 	}
 }
 
+func TestGenerateOpponentReplyForSPINAndBATNA(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	tests := []struct {
+		name  string
+		move  PlayerMove
+		state domain.SessionState
+		want  string
+	}{
+		{
+			name:  "situation",
+			move:  PlayerMove{Intent: IntentAskSituation},
+			state: domain.InitialSessionState(),
+			want:  "Сейчас для меня важны сроки, доступные ресурсы и предсказуемость результата.",
+		},
+		{
+			name:  "problem without context",
+			move:  PlayerMove{Intent: IntentIdentifyProblem},
+			state: domain.InitialSessionState(),
+			want:  "Сначала уточните исходные условия, чтобы мы одинаково понимали проблему.",
+		},
+		{
+			name:  "implication after problem",
+			move:  PlayerMove{Intent: IntentExploreImplication},
+			state: domain.SessionState{ProblemIdentified: true, SPINStage: domain.SPINStageProblem},
+			want:  "Если ничего не менять, риски и издержки действительно возрастут. Какой результат вы предлагаете?",
+		},
+		{
+			name:  "need payoff after implications",
+			move:  PlayerMove{Intent: IntentClarifyNeedPayoff},
+			state: domain.SessionState{ImplicationsExplored: true, SPINStage: domain.SPINStageImplication},
+			want:  "Такой результат был бы полезен. Теперь предложите конкретные условия его достижения.",
+		},
+		{
+			name:  "BATNA after interests",
+			move:  PlayerMove{Intent: IntentStateBATNA},
+			state: domain.SessionState{InterestsExplored: true},
+			want:  "Альтернатива понятна. Сравним её с возможным соглашением по объективным критериям.",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session := domain.Session{TrustScore: 50, State: test.state}
+			evaluation := EvaluateMove(test.move, session.State)
+			if got := GenerateOpponentReply(test.move, session, rules, evaluation); got != test.want {
+				t.Fatalf("unexpected reply:\n got: %q\nwant: %q", got, test.want)
+			}
+		})
+	}
+}
+
 func readyState() domain.SessionState {
 	return domain.SessionState{
 		Phase:             domain.PhaseExploration,

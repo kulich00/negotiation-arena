@@ -54,6 +54,8 @@ func evaluateStructuredResult(result *domain.Result, session domain.Session, rul
 		result.Recommendations = append(result.Recommendations, "Подкрепите позицию измеримыми фактами")
 	}
 
+	evaluateSPINAndBATNA(result, session.State)
+
 	if !session.State.OfferMade {
 		result.Recommendations = append(result.Recommendations, "Сформулируйте конкретное предложение")
 	} else if !session.State.OfferAccepted {
@@ -73,6 +75,29 @@ func evaluateStructuredResult(result *domain.Result, session domain.Session, rul
 		result.Outcome = "Компромисс"
 	default:
 		result.Outcome = "Соглашение не достигнуто"
+	}
+}
+
+func evaluateSPINAndBATNA(result *domain.Result, state domain.SessionState) {
+	if state.SPINStage == domain.SPINStageNeedPayoff {
+		result.Strengths = append(result.Strengths, "Последовательно пройдены все этапы SPIN")
+	} else if state.SituationExplored || state.ProblemIdentified || state.ImplicationsExplored || state.NeedPayoffEstablished {
+		switch state.SPINStage {
+		case domain.SPINStageNone:
+			result.Recommendations = append(result.Recommendations, "Начните SPIN-анализ с уточнения ситуации")
+		case domain.SPINStageSituation:
+			result.Recommendations = append(result.Recommendations, "Продолжите SPIN-анализ формулированием проблемы")
+		case domain.SPINStageProblem:
+			result.Recommendations = append(result.Recommendations, "Исследуйте последствия выявленной проблемы")
+		case domain.SPINStageImplication:
+			result.Recommendations = append(result.Recommendations, "Уточните ценность решения для второй стороны")
+		}
+	}
+
+	if state.BATNADefined {
+		result.Strengths = append(result.Strengths, "Определена альтернатива на случай отсутствия соглашения")
+	} else {
+		result.Recommendations = append(result.Recommendations, "Заранее определите BATNA и границу приемлемого соглашения")
 	}
 }
 

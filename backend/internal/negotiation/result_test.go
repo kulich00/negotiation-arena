@@ -116,6 +116,56 @@ func TestEvaluateResultUsesWeightsAndPressure(t *testing.T) {
 	}
 }
 
+func TestEvaluateResultIncludesSPINAndBATNAFeedback(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	session := successfulStructuredSession()
+	session.State.SituationExplored = true
+	session.State.ProblemIdentified = true
+	session.State.ImplicationsExplored = true
+	session.State.NeedPayoffEstablished = true
+	session.State.SPINStage = domain.SPINStageNeedPayoff
+	session.State.BATNADefined = true
+
+	result := EvaluateResult(session, rules)
+	if !slices.Contains(result.Strengths, "Последовательно пройдены все этапы SPIN") {
+		t.Fatalf("SPIN strength is missing: %+v", result.Strengths)
+	}
+	if !slices.Contains(result.Strengths, "Определена альтернатива на случай отсутствия соглашения") {
+		t.Fatalf("BATNA strength is missing: %+v", result.Strengths)
+	}
+}
+
+func TestEvaluateResultDoesNotTreatOutOfOrderSPINAsComplete(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	session := successfulStructuredSession()
+	session.State.ProblemIdentified = true
+	session.State.ImplicationsExplored = true
+	session.State.NeedPayoffEstablished = true
+
+	result := EvaluateResult(session, rules)
+	if slices.Contains(result.Strengths, "Последовательно пройдены все этапы SPIN") {
+		t.Fatalf("out-of-order SPIN was treated as complete: %+v", result.Strengths)
+	}
+	if !slices.Contains(result.Recommendations, "Начните SPIN-анализ с уточнения ситуации") {
+		t.Fatalf("missing restart recommendation: %+v", result.Recommendations)
+	}
+}
+
+func TestEvaluateResultRecommendsNextSPINStepAndBATNA(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	session := successfulStructuredSession()
+	session.State.SituationExplored = true
+	session.State.SPINStage = domain.SPINStageSituation
+
+	result := EvaluateResult(session, rules)
+	if !slices.Contains(result.Recommendations, "Продолжите SPIN-анализ формулированием проблемы") {
+		t.Fatalf("next SPIN step is missing: %+v", result.Recommendations)
+	}
+	if !slices.Contains(result.Recommendations, "Заранее определите BATNA и границу приемлемого соглашения") {
+		t.Fatalf("BATNA recommendation is missing: %+v", result.Recommendations)
+	}
+}
+
 func successfulStructuredSession() domain.Session {
 	return domain.Session{
 		ID:            "session",

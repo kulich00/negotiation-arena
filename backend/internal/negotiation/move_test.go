@@ -22,6 +22,11 @@ func TestValidateMove(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "ask interests", move: PlayerMove{Content: "Что для вас важно?", Intent: IntentAskInterest}},
+		{name: "ask situation", move: PlayerMove{Content: "Как устроен текущий процесс?", Intent: IntentAskSituation}},
+		{name: "identify problem", move: PlayerMove{Content: "Что мешает получить результат?", Intent: IntentIdentifyProblem}},
+		{name: "explore implication", move: PlayerMove{Content: "К чему приведёт задержка?", Intent: IntentExploreImplication}},
+		{name: "clarify need payoff", move: PlayerMove{Content: "Что даст решение проблемы?", Intent: IntentClarifyNeedPayoff}},
+		{name: "state BATNA", move: PlayerMove{Content: "Если не договоримся, перенесём объём на следующий квартал.", Intent: IntentStateBATNA}},
 		{name: "blank content", move: PlayerMove{Content: "  ", Intent: IntentAskInterest}, wantErr: true},
 		{name: "content too long", move: PlayerMove{Content: strings.Repeat("я", maxMoveContentLength+1), Intent: IntentAskInterest}, wantErr: true},
 		{name: "unknown intent", move: PlayerMove{Content: "Текст", Intent: "unknown"}, wantErr: true},
@@ -89,6 +94,48 @@ func TestFreeFormProposalForDefaultScenario(t *testing.T) {
 	move.Proposal = &MoveProposal{Kind: "none", Value: 1}
 	if err := ValidateMove(move, rules); !errors.Is(err, ErrInvalidMove) {
 		t.Fatalf("expected proposal details to be rejected, got %v", err)
+	}
+}
+
+func TestEvaluateMoveTracksSPINAndBATNA(t *testing.T) {
+	state := domain.InitialSessionState()
+
+	situation := EvaluateMove(PlayerMove{Intent: IntentAskSituation}, state)
+	if situation.TrustDelta != 1 || !situation.State.SituationExplored || situation.State.SPINStage != domain.SPINStageSituation || situation.State.Phase != domain.PhaseExploration {
+		t.Fatalf("unexpected situation evaluation: %+v", situation)
+	}
+	problem := EvaluateMove(PlayerMove{Intent: IntentIdentifyProblem}, situation.State)
+	if problem.TrustDelta != 1 || problem.ArgumentDelta != 1 || !problem.State.ProblemIdentified || problem.State.SPINStage != domain.SPINStageProblem {
+		t.Fatalf("unexpected problem evaluation: %+v", problem)
+	}
+	implication := EvaluateMove(PlayerMove{Intent: IntentExploreImplication}, problem.State)
+	if implication.ArgumentDelta != 2 || !implication.State.ImplicationsExplored || implication.State.SPINStage != domain.SPINStageImplication {
+		t.Fatalf("unexpected implication evaluation: %+v", implication)
+	}
+	needPayoff := EvaluateMove(PlayerMove{Intent: IntentClarifyNeedPayoff}, implication.State)
+	if needPayoff.TrustDelta != 2 || needPayoff.ArgumentDelta != 1 || !needPayoff.State.NeedPayoffEstablished || needPayoff.State.SPINStage != domain.SPINStageNeedPayoff {
+		t.Fatalf("unexpected need-payoff evaluation: %+v", needPayoff)
+	}
+	batna := EvaluateMove(PlayerMove{Intent: IntentStateBATNA}, needPayoff.State)
+	if batna.ArgumentDelta != 1 || !batna.State.BATNADefined {
+		t.Fatalf("unexpected BATNA evaluation: %+v", batna)
+	}
+}
+
+func TestEvaluateImplicationBeforeProblemHasReducedImpact(t *testing.T) {
+	evaluation := EvaluateMove(PlayerMove{Intent: IntentExploreImplication}, domain.InitialSessionState())
+	if evaluation.ArgumentDelta != 1 || !evaluation.State.ImplicationsExplored || evaluation.State.SPINStage != domain.SPINStageNone {
+		t.Fatalf("unexpected out-of-order implication evaluation: %+v", evaluation)
+	}
+
+	problem := EvaluateMove(PlayerMove{Intent: IntentIdentifyProblem}, domain.InitialSessionState())
+	if problem.TrustDelta != 0 || problem.ArgumentDelta != 1 || problem.State.SPINStage != domain.SPINStageNone {
+		t.Fatalf("unexpected out-of-order problem evaluation: %+v", problem)
+	}
+
+	needPayoff := EvaluateMove(PlayerMove{Intent: IntentClarifyNeedPayoff}, domain.InitialSessionState())
+	if needPayoff.TrustDelta != 1 || needPayoff.ArgumentDelta != 0 || needPayoff.State.SPINStage != domain.SPINStageNone {
+		t.Fatalf("unexpected out-of-order need-payoff evaluation: %+v", needPayoff)
 	}
 }
 

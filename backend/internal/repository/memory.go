@@ -232,7 +232,7 @@ func (r *MemoryRepository) Finish(_ context.Context, session domain.Session, res
 		return ErrConflict
 	}
 	r.sessions[session.ID] = session
-	r.results[result.SessionID] = result
+	r.results[result.SessionID] = cloneResult(result)
 	return nil
 }
 
@@ -243,7 +243,7 @@ func (r *MemoryRepository) Result(_ context.Context, sessionID string) (domain.R
 	if !ok {
 		return domain.Result{}, ErrNotFound
 	}
-	return item, nil
+	return cloneResult(item), nil
 }
 
 func cloneScenario(s domain.Scenario) domain.Scenario {
@@ -255,4 +255,18 @@ func cloneTurnAnalysis(analysis domain.TurnAnalysis) domain.TurnAnalysis {
 	analysis.Strengths = append([]string{}, analysis.Strengths...)
 	analysis.Risks = append([]string{}, analysis.Risks...)
 	return analysis
+}
+
+func cloneResult(result domain.Result) domain.Result {
+	result.Strengths = append([]string{}, result.Strengths...)
+	result.Mistakes = append([]string{}, result.Mistakes...)
+	result.Recommendations = append([]string{}, result.Recommendations...)
+	result.Analysis.Techniques = append([]domain.TechniqueUsage{}, result.Analysis.Techniques...)
+	result.Analysis.RepeatedRisks = append([]domain.RepeatedRisk{}, result.Analysis.RepeatedRisks...)
+	result.Analysis.PriorityRecommendations = append([]string{}, result.Analysis.PriorityRecommendations...)
+	if result.Analysis.BestMove != nil {
+		bestMove := *result.Analysis.BestMove
+		result.Analysis.BestMove = &bestMove
+	}
+	return result
 }

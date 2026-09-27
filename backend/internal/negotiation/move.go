@@ -12,11 +12,16 @@ import (
 type MoveIntent string
 
 const (
-	IntentAskInterest     MoveIntent = "ask_interest"
-	IntentPresentEvidence MoveIntent = "present_evidence"
-	IntentPropose         MoveIntent = "propose"
-	IntentAccept          MoveIntent = "accept"
-	IntentPressure        MoveIntent = "pressure"
+	IntentAskInterest        MoveIntent = "ask_interest"
+	IntentPresentEvidence    MoveIntent = "present_evidence"
+	IntentAskSituation       MoveIntent = "ask_situation"
+	IntentIdentifyProblem    MoveIntent = "identify_problem"
+	IntentExploreImplication MoveIntent = "explore_implication"
+	IntentClarifyNeedPayoff  MoveIntent = "clarify_need_payoff"
+	IntentStateBATNA         MoveIntent = "state_batna"
+	IntentPropose            MoveIntent = "propose"
+	IntentAccept             MoveIntent = "accept"
+	IntentPressure           MoveIntent = "pressure"
 )
 
 type PlayerMove struct {
@@ -61,7 +66,7 @@ func ValidateMove(move PlayerMove, rules domain.ScenarioRules) error {
 		if move.Proposal != nil && freeFormProposal {
 			return fmt.Errorf("%w: proposal details are not supported by this scenario", ErrInvalidMove)
 		}
-	case IntentAskInterest, IntentPresentEvidence, IntentAccept, IntentPressure:
+	case IntentAskInterest, IntentPresentEvidence, IntentAskSituation, IntentIdentifyProblem, IntentExploreImplication, IntentClarifyNeedPayoff, IntentStateBATNA, IntentAccept, IntentPressure:
 		if move.Proposal != nil {
 			return fmt.Errorf("%w: proposal is only allowed for propose", ErrInvalidMove)
 		}
@@ -123,6 +128,48 @@ func EvaluateMove(move PlayerMove, state domain.SessionState) MoveEvaluation {
 		evaluation.TrustDelta = 1
 		evaluation.ArgumentDelta = 2
 		evaluation.State.EvidencePresented = true
+		advanceToExploration(&evaluation.State)
+	case IntentAskSituation:
+		evaluation.TrustDelta = 1
+		evaluation.State.SituationExplored = true
+		if evaluation.State.SPINStage < domain.SPINStageSituation {
+			evaluation.State.SPINStage = domain.SPINStageSituation
+		}
+		advanceToExploration(&evaluation.State)
+	case IntentIdentifyProblem:
+		evaluation.ArgumentDelta = 1
+		evaluation.State.ProblemIdentified = true
+		if state.SPINStage >= domain.SPINStageSituation {
+			evaluation.TrustDelta = 1
+		}
+		if state.SPINStage == domain.SPINStageSituation {
+			evaluation.State.SPINStage = domain.SPINStageProblem
+		}
+		advanceToExploration(&evaluation.State)
+	case IntentExploreImplication:
+		evaluation.ArgumentDelta = 1
+		if state.SPINStage >= domain.SPINStageProblem {
+			evaluation.ArgumentDelta = 2
+		}
+		evaluation.State.ImplicationsExplored = true
+		if evaluation.State.SPINStage == domain.SPINStageProblem {
+			evaluation.State.SPINStage = domain.SPINStageImplication
+		}
+		advanceToExploration(&evaluation.State)
+	case IntentClarifyNeedPayoff:
+		evaluation.TrustDelta = 1
+		if state.SPINStage >= domain.SPINStageImplication {
+			evaluation.TrustDelta = 2
+			evaluation.ArgumentDelta = 1
+		}
+		evaluation.State.NeedPayoffEstablished = true
+		if state.SPINStage == domain.SPINStageImplication {
+			evaluation.State.SPINStage = domain.SPINStageNeedPayoff
+		}
+		advanceToExploration(&evaluation.State)
+	case IntentStateBATNA:
+		evaluation.ArgumentDelta = 1
+		evaluation.State.BATNADefined = true
 		advanceToExploration(&evaluation.State)
 	case IntentPropose:
 		evaluation.TrustDelta = 1

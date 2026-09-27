@@ -259,6 +259,10 @@ func (r *PostgresRepository) Finish(ctx context.Context, s domain.Session, resul
 	if err != nil {
 		return err
 	}
+	analysis, err := json.Marshal(result.Analysis)
+	if err != nil {
+		return err
+	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -271,7 +275,7 @@ func (r *PostgresRepository) Finish(ctx context.Context, s domain.Session, resul
 	if command.RowsAffected() != 1 {
 		return ErrConflict
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO results (session_id,final_score,outcome,strengths,mistakes,recommendations) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb)`, result.SessionID, result.FinalScore, result.Outcome, string(strengths), string(mistakes), string(recommendations))
+	_, err = tx.Exec(ctx, `INSERT INTO results (session_id,final_score,outcome,strengths,mistakes,recommendations,analysis) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`, result.SessionID, result.FinalScore, result.Outcome, string(strengths), string(mistakes), string(recommendations), string(analysis))
 	if err != nil {
 		return err
 	}
@@ -280,8 +284,8 @@ func (r *PostgresRepository) Finish(ctx context.Context, s domain.Session, resul
 
 func (r *PostgresRepository) Result(ctx context.Context, id string) (domain.Result, error) {
 	var result domain.Result
-	var strengths, mistakes, recommendations []byte
-	err := r.db.QueryRow(ctx, `SELECT session_id,final_score,outcome,strengths,mistakes,recommendations FROM results WHERE session_id=$1`, id).Scan(&result.SessionID, &result.FinalScore, &result.Outcome, &strengths, &mistakes, &recommendations)
+	var strengths, mistakes, recommendations, analysis []byte
+	err := r.db.QueryRow(ctx, `SELECT session_id,final_score,outcome,strengths,mistakes,recommendations,analysis FROM results WHERE session_id=$1`, id).Scan(&result.SessionID, &result.FinalScore, &result.Outcome, &strengths, &mistakes, &recommendations, &analysis)
 	if err != nil {
 		return result, notFound(err)
 	}
@@ -292,6 +296,9 @@ func (r *PostgresRepository) Result(ctx context.Context, id string) (domain.Resu
 		return result, err
 	}
 	if err := json.Unmarshal(recommendations, &result.Recommendations); err != nil {
+		return result, err
+	}
+	if err := json.Unmarshal(analysis, &result.Analysis); err != nil {
 		return result, err
 	}
 	return result, nil

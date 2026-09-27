@@ -27,3 +27,29 @@ func TestAnalyzeLegacyMoveRecognizesPressure(t *testing.T) {
 		t.Fatalf("unexpected legacy analysis: %+v", analysis)
 	}
 }
+
+func TestAnalyzeStructuredMoveExplainsSPINOrder(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	move := PlayerMove{Content: "К чему приведёт проблема?", Intent: IntentExploreImplication}
+	evaluation := EvaluateMove(move, domain.InitialSessionState())
+
+	analysis := AnalyzeStructuredMove(move, domain.InitialSessionState(), rules, evaluation)
+	if analysis.Technique != "spin_implication" || analysis.ArgumentDelta != 1 {
+		t.Fatalf("unexpected analysis: %+v", analysis)
+	}
+	if len(analysis.Risks) != 1 || analysis.Recommendation != "Сначала согласуйте, какую именно проблему необходимо решить." {
+		t.Fatalf("missing SPIN order explanation: %+v", analysis)
+	}
+}
+
+func TestAnalyzeStructuredMoveExplainsPreparedBATNA(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	state := domain.SessionState{InterestsExplored: true}
+	move := PlayerMove{Content: "У нас есть альтернативный вариант.", Intent: IntentStateBATNA}
+	evaluation := EvaluateMove(move, state)
+
+	analysis := AnalyzeStructuredMove(move, state, rules, evaluation)
+	if analysis.Technique != "batna_preparation" || analysis.ArgumentDelta != 1 || len(analysis.Risks) != 0 {
+		t.Fatalf("unexpected BATNA analysis: %+v", analysis)
+	}
+}

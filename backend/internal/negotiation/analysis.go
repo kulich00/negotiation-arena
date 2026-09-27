@@ -34,6 +34,51 @@ func AnalyzeStructuredMove(move PlayerMove, before domain.SessionState, rules do
 		} else {
 			analysis.Recommendation = "Свяжите доказательства с конкретным взаимовыгодным предложением."
 		}
+	case IntentAskSituation:
+		analysis.Technique = "spin_situation"
+		analysis.Summary = "Вы уточнили исходную ситуацию и контекст второй стороны."
+		analysis.Strengths = append(analysis.Strengths, "Собран контекст для дальнейшего исследования проблемы")
+		analysis.Recommendation = "Перейдите к вопросу о конкретной проблеме или препятствии."
+	case IntentIdentifyProblem:
+		analysis.Technique = "spin_problem"
+		analysis.Summary = "Вы помогли второй стороне сформулировать проблему."
+		if before.SPINStage < domain.SPINStageSituation {
+			analysis.Risks = append(analysis.Risks, "Проблема обсуждается без уточнения исходной ситуации")
+			analysis.Recommendation = "Уточните контекст и ограничения, чтобы проверить понимание проблемы."
+		} else {
+			analysis.Strengths = append(analysis.Strengths, "Проблема связана с ранее уточнённым контекстом")
+			analysis.Recommendation = "Исследуйте последствия проблемы для второй стороны."
+		}
+	case IntentExploreImplication:
+		analysis.Technique = "spin_implication"
+		analysis.Summary = "Вы исследовали последствия нерешённой проблемы."
+		if before.SPINStage < domain.SPINStageProblem {
+			analysis.Risks = append(analysis.Risks, "Последствия обсуждаются до формулирования проблемы")
+			analysis.Recommendation = "Сначала согласуйте, какую именно проблему необходимо решить."
+		} else {
+			analysis.Strengths = append(analysis.Strengths, "Показана значимость решения проблемы")
+			analysis.Recommendation = "Уточните, какую ценность даст желаемое решение."
+		}
+	case IntentClarifyNeedPayoff:
+		analysis.Technique = "spin_need_payoff"
+		analysis.Summary = "Вы помогли сформулировать ценность и желаемый результат решения."
+		if before.SPINStage < domain.SPINStageImplication {
+			analysis.Risks = append(analysis.Risks, "Ценность решения обсуждается без анализа последствий проблемы")
+			analysis.Recommendation = "Покажите последствия текущей проблемы, прежде чем переходить к выгоде решения."
+		} else {
+			analysis.Strengths = append(analysis.Strengths, "Ценность решения сформулирована второй стороной")
+			analysis.Recommendation = "Свяжите выявленную ценность с конкретным предложением."
+		}
+	case IntentStateBATNA:
+		analysis.Technique = "batna_preparation"
+		analysis.Summary = "Вы обозначили альтернативу на случай отсутствия соглашения."
+		analysis.Strengths = append(analysis.Strengths, "Определена граница приемлемого соглашения")
+		if !before.InterestsExplored {
+			analysis.Risks = append(analysis.Risks, "BATNA обозначена до исследования интересов второй стороны")
+			analysis.Recommendation = "Сначала уточните интересы собеседника, затем сравнивайте варианты с BATNA."
+		} else {
+			analysis.Recommendation = "Сравните предложение и BATNA по одинаковым объективным критериям."
+		}
 	case IntentPropose:
 		analysis.Technique = "harvard_mutual_gain"
 		analysis.Summary = "Вы перевели обсуждение к конкретному варианту соглашения."

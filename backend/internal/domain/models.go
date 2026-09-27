@@ -79,11 +79,21 @@ func (r ScenarioRules) WithDefaults() ScenarioRules {
 
 type NegotiationPhase string
 
+type SPINStage int
+
 const (
 	PhaseOpening     NegotiationPhase = "opening"
 	PhaseExploration NegotiationPhase = "exploration"
 	PhaseBargaining  NegotiationPhase = "bargaining"
 	PhaseFinished    NegotiationPhase = "finished"
+)
+
+const (
+	SPINStageNone SPINStage = iota
+	SPINStageSituation
+	SPINStageProblem
+	SPINStageImplication
+	SPINStageNeedPayoff
 )
 
 func InitialSessionState() SessionState {
@@ -104,22 +114,56 @@ type Session struct {
 }
 
 type SessionState struct {
-	Phase               NegotiationPhase `json:"phase"`
-	InterestsExplored   bool             `json:"interestsExplored"`
-	EvidencePresented   bool             `json:"evidencePresented"`
-	OfferMade           bool             `json:"offerMade"`
-	OfferAccepted       bool             `json:"offerAccepted"`
-	LastOfferID         string           `json:"lastOfferId,omitempty"`
-	StructuredMovesUsed bool             `json:"structuredMovesUsed"`
+	Phase                 NegotiationPhase `json:"phase"`
+	InterestsExplored     bool             `json:"interestsExplored"`
+	EvidencePresented     bool             `json:"evidencePresented"`
+	SituationExplored     bool             `json:"situationExplored"`
+	ProblemIdentified     bool             `json:"problemIdentified"`
+	ImplicationsExplored  bool             `json:"implicationsExplored"`
+	NeedPayoffEstablished bool             `json:"needPayoffEstablished"`
+	SPINStage             SPINStage        `json:"spinStage"`
+	BATNADefined          bool             `json:"batnaDefined"`
+	OfferMade             bool             `json:"offerMade"`
+	OfferAccepted         bool             `json:"offerAccepted"`
+	LastOfferID           string           `json:"lastOfferId,omitempty"`
+	StructuredMovesUsed   bool             `json:"structuredMovesUsed"`
 }
 
 type Result struct {
-	SessionID       string   `json:"sessionId"`
-	FinalScore      int      `json:"finalScore"`
-	Outcome         string   `json:"outcome"`
-	Strengths       []string `json:"strengths"`
-	Mistakes        []string `json:"mistakes"`
-	Recommendations []string `json:"recommendations"`
+	SessionID       string          `json:"sessionId"`
+	FinalScore      int             `json:"finalScore"`
+	Outcome         string          `json:"outcome"`
+	Strengths       []string        `json:"strengths"`
+	Mistakes        []string        `json:"mistakes"`
+	Recommendations []string        `json:"recommendations"`
+	Analysis        SessionAnalysis `json:"analysis"`
+}
+
+type SessionAnalysis struct {
+	AnalyzedTurns           int              `json:"analyzedTurns"`
+	Techniques              []TechniqueUsage `json:"techniques"`
+	RepeatedRisks           []RepeatedRisk   `json:"repeatedRisks"`
+	PriorityRecommendations []string         `json:"priorityRecommendations"`
+	BestMove                *BestMoveInsight `json:"bestMove,omitempty"`
+}
+
+type TechniqueUsage struct {
+	Technique string `json:"technique"`
+	Label     string `json:"label"`
+	Count     int    `json:"count"`
+}
+
+type RepeatedRisk struct {
+	Risk  string `json:"risk"`
+	Count int    `json:"count"`
+}
+
+type BestMoveInsight struct {
+	Turn        int    `json:"turn"`
+	Technique   string `json:"technique"`
+	Label       string `json:"label"`
+	Summary     string `json:"summary"`
+	ScoreImpact int    `json:"scoreImpact"`
 }
 
 type Message struct {

@@ -61,6 +61,9 @@ func TestNegotiationFlow(t *testing.T) {
 	if result.FinalScore == 0 {
 		t.Fatal("expected non-zero score")
 	}
+	if result.Analysis.AnalyzedTurns != 1 || result.Analysis.BestMove == nil {
+		t.Fatalf("missing session analysis: %+v", result.Analysis)
+	}
 	finished, err := service.Session(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +143,12 @@ func TestProcessMovePersistsDeterministicState(t *testing.T) {
 	if result.Outcome != "Компромисс" || result.FinalScore != 66 {
 		t.Fatalf("unexpected structured result: %+v", result)
 	}
+	if result.Analysis.AnalyzedTurns != 4 || len(result.Analysis.Techniques) != 4 {
+		t.Fatalf("unexpected aggregate analysis: %+v", result.Analysis)
+	}
+	if result.Analysis.BestMove == nil || result.Analysis.BestMove.Turn != 2 || result.Analysis.BestMove.Technique != "evidence_based_argument" {
+		t.Fatalf("unexpected best move: %+v", result.Analysis.BestMove)
+	}
 }
 
 func TestProcessMoveRejectsAcceptWithoutOffer(t *testing.T) {
@@ -201,6 +210,42 @@ func TestProcessMoveDoesNotCallLegacyProvider(t *testing.T) {
 	}
 	if turn.Reply == "" {
 		t.Fatal("expected deterministic opponent reply")
+	}
+}
+
+func TestProcessMovePersistsSPINAndBATNAState(t *testing.T) {
+	service := NewService(repository.NewMemoryRepository(), failingProvider{})
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	moves := []PlayerMove{
+		{Content: "Как сейчас устроен процесс пересмотра?", Intent: IntentAskSituation},
+		{Content: "Что мешает пересмотреть условия сейчас?", Intent: IntentIdentifyProblem},
+		{Content: "К чему приведёт сохранение текущих условий?", Intent: IntentExploreImplication},
+		{Content: "Что даст компании согласованный план роста?", Intent: IntentClarifyNeedPayoff},
+		{Content: "Без соглашения я продолжу оценивать другие варианты.", Intent: IntentStateBATNA},
+	}
+	for _, move := range moves {
+		turn, err := service.ProcessMove(context.Background(), session.ID, move)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if turn.Analysis.Technique == "" {
+			t.Fatalf("missing analysis for %s", move.Intent)
+		}
+	}
+
+	loaded, err := service.Session(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.State.SituationExplored || !loaded.State.ProblemIdentified || !loaded.State.ImplicationsExplored || !loaded.State.NeedPayoffEstablished || loaded.State.SPINStage != domain.SPINStageNeedPayoff || !loaded.State.BATNADefined {
+		t.Fatalf("SPIN/BATNA state was not persisted: %+v", loaded.State)
 	}
 }
 

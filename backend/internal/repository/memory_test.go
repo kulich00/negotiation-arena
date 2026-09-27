@@ -59,4 +59,36 @@ func TestMemoryRepositoryPreservesRulesAndState(t *testing.T) {
 	if reloadedMessages[1].Analysis.Strengths[0] != "Открытый вопрос" {
 		t.Fatal("stored message analysis was mutated through returned data")
 	}
+
+	session.Status = "finished"
+	result := domain.Result{
+		SessionID:       session.ID,
+		Strengths:       []string{"Сильная сторона"},
+		Mistakes:        []string{},
+		Recommendations: []string{"Рекомендация"},
+		Analysis: domain.SessionAnalysis{
+			Techniques:              []domain.TechniqueUsage{{Technique: "harvard_interests", Count: 1}},
+			RepeatedRisks:           []domain.RepeatedRisk{},
+			PriorityRecommendations: []string{"Рекомендация"},
+			BestMove:                &domain.BestMoveInsight{Turn: 1, Technique: "harvard_interests"},
+		},
+	}
+	if err := repo.Finish(ctx, session, result); err != nil {
+		t.Fatal(err)
+	}
+	loadedResult, err := repo.Result(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedResult.Strengths[0] = "changed"
+	loadedResult.Analysis.Techniques[0].Technique = "changed"
+	loadedResult.Analysis.PriorityRecommendations[0] = "changed"
+	loadedResult.Analysis.BestMove.Technique = "changed"
+	reloadedResult, err := repo.Result(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedResult.Strengths[0] != "Сильная сторона" || reloadedResult.Analysis.Techniques[0].Technique != "harvard_interests" || reloadedResult.Analysis.PriorityRecommendations[0] != "Рекомендация" || reloadedResult.Analysis.BestMove.Technique != "harvard_interests" {
+		t.Fatalf("stored result was mutated through returned data: %+v", reloadedResult)
+	}
 }

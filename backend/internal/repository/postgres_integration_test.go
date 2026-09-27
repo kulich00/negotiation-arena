@@ -123,6 +123,13 @@ func TestPostgresPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
+		Content: "Если не договоримся, вернёмся к пересмотру в следующем квартале.",
+		Intent:  negotiation.IntentStateBATNA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ProcessMove(ctx, session.ID, negotiation.PlayerMove{
 		Content: "Показатели за квартал выросли.",
 		Intent:  negotiation.IntentPresentEvidence,
 	})
@@ -165,17 +172,17 @@ func TestPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedSession.Status != "finished" || loadedSession.Turn != 4 || loadedSession.InitialMessage != originalInitialMessage || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.StructuredMovesUsed || !loadedSession.State.InterestsExplored || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || !loadedSession.State.OfferAccepted || loadedSession.State.LastOfferID != "review_later" {
+	if loadedSession.Status != "finished" || loadedSession.Turn != 5 || loadedSession.InitialMessage != originalInitialMessage || loadedSession.State.Phase != domain.PhaseFinished || !loadedSession.State.StructuredMovesUsed || !loadedSession.State.InterestsExplored || !loadedSession.State.BATNADefined || !loadedSession.State.EvidencePresented || !loadedSession.State.OfferMade || !loadedSession.State.OfferAccepted || loadedSession.State.LastOfferID != "review_later" {
 		t.Fatalf("unexpected session: %+v", loadedSession)
 	}
 	messages, err := reopened.Messages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 9 || messages[0].Content != originalInitialMessage || messages[1].Content != "Какие условия возможны?" {
+	if len(messages) != 11 || messages[0].Content != originalInitialMessage || messages[1].Content != "Какие условия возможны?" {
 		t.Fatalf("unexpected messages: %+v", messages)
 	}
-	if messages[1].Analysis == nil || messages[1].Analysis.Technique != "harvard_interests" || messages[2].Analysis != nil || messages[7].Analysis == nil || messages[7].Analysis.Technique != "agreement_confirmation" {
+	if messages[1].Analysis == nil || messages[1].Analysis.Technique != "harvard_interests" || messages[2].Analysis != nil || messages[3].Analysis == nil || messages[3].Analysis.Technique != "batna_preparation" || messages[9].Analysis == nil || messages[9].Analysis.Technique != "agreement_confirmation" {
 		t.Fatalf("turn analysis was not persisted correctly: %+v", messages)
 	}
 	loadedResult, err := reopened.Result(ctx, session.ID)
@@ -185,7 +192,13 @@ func TestPostgresPersistence(t *testing.T) {
 	if loadedResult.FinalScore != result.FinalScore {
 		t.Fatalf("unexpected result: %+v", loadedResult)
 	}
-	if loadedResult.Outcome != "Компромисс" {
+	if loadedResult.Outcome != "Выгодное соглашение" {
 		t.Fatalf("unexpected outcome: %+v", loadedResult)
+	}
+	if loadedResult.Analysis.AnalyzedTurns != 5 || len(loadedResult.Analysis.Techniques) != 5 {
+		t.Fatalf("aggregate analysis was not persisted: %+v", loadedResult.Analysis)
+	}
+	if loadedResult.Analysis.BestMove == nil || loadedResult.Analysis.BestMove.Turn != 3 || loadedResult.Analysis.BestMove.Technique != "evidence_based_argument" {
+		t.Fatalf("unexpected persisted best move: %+v", loadedResult.Analysis.BestMove)
 	}
 }
