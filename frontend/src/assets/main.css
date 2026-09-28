@@ -63,6 +63,34 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   margin-top: 20px;
 }
 
+.player-progress-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2fr;
+  gap: 20px;
+  align-items: center;
+  background: linear-gradient(135deg, #ffffff, #eef6ff);
+  border: 1px solid #cfe0f2;
+  border-radius: 18px;
+  padding: 22px 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 8px 24px rgba(16, 42, 67, 0.06);
+}
+
+.player-progress-card h2, .player-progress-card p { margin-bottom: 4px; }
+.progress-caption { color: #486581; margin-top: 0; }
+.player-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.player-stat-grid div {
+  display: flex; flex-direction: column; align-items: center;
+  background: white; border: 1px solid #d8e1ea; border-radius: 12px; padding: 12px;
+}
+.player-stat-grid strong { color: #1f6feb; font-size: 1.35rem; }
+.player-stat-grid span { color: #627d98; font-size: .75rem; }
+.profile-achievements { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.achievement-chip {
+  padding: 6px 10px; background: #fff8dc; border: 1px solid #f4d675;
+  color: #7a5500; border-radius: 999px; font-size: .78rem; font-weight: 700;
+}
+
 .pill {
   background: #ffffff;
   border: 1px solid #d8e1ea;
@@ -163,6 +191,13 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 .scenario-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 20px 30px rgba(16, 42, 67, 0.12);
+}
+
+.scenario-card.scenario-locked { opacity: .72; }
+.scenario-card.scenario-locked:hover { transform: none; box-shadow: 0 18px 40px rgba(16, 42, 67, .08); }
+.locked-scenario-message {
+  padding: 11px 14px; text-align: center; border-radius: 10px;
+  background: #f1f5f9; color: #627d98; font-size: .84rem; font-weight: 700;
 }
 
 .card-header {
@@ -487,6 +522,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   border-radius: 8px;
 }
 
+.branch-pill {
+  font-size: .78rem; color: #6d28d9; background: #f3e8ff;
+  padding: 6px 10px; border-radius: 8px; font-weight: 700;
+}
+
 /* Окно сообщений чата */
 .dialogue-body {
   flex: 1;
@@ -544,6 +584,26 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   border-top-right-radius: 4px;
 }
 
+.turn-analysis {
+  width: min(520px, 100%);
+  background: #f8fafc;
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #334e68;
+  font-size: .78rem;
+}
+.analysis-heading { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.analysis-heading strong { color: #102a43; }
+.technique-code { color: #627d98; font-family: ui-monospace, monospace; font-size: .68rem; }
+.analysis-deltas { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.analysis-deltas span { padding: 3px 7px; border-radius: 999px; background: #e9eef4; font-weight: 700; }
+.analysis-deltas .positive { background: #dcfce7; color: #047857; }
+.analysis-deltas .negative { background: #fee2e2; color: #b91c1c; }
+.turn-errors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.error-chip { padding: 3px 7px; border-radius: 7px; background: #fff1f2; color: #be123c; font-weight: 700; }
+.analysis-recommendation { margin: 8px 0 0; color: #1d4ed8; line-height: 1.35; }
+
 /* Индикатор печатания */
 .message-bubble.typing {
   display: flex;
@@ -592,6 +652,15 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   flex-direction: column;
   gap: 10px;
 }
+
+.retry-strip { display: flex; align-items: center; gap: 7px; overflow-x: auto; color: #627d98; font-size: .75rem; }
+.retry-strip > span { white-space: nowrap; font-weight: 700; }
+.checkpoint-button {
+  border: 1px solid #c4b5fd; background: #f5f3ff; color: #6d28d9;
+  border-radius: 8px; padding: 5px 9px; cursor: pointer; font-size: .75rem; white-space: nowrap;
+}
+.checkpoint-button:hover { background: #ede9fe; }
+.checkpoint-button:disabled { opacity: .5; cursor: not-allowed; }
 
 .hints-row {
   display: flex;
@@ -716,6 +785,17 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 .result-list.strengths li { color: #047857; }
 .result-list.mistakes li { color: #c53030; }
 .result-list.recommendations li { color: #1d4ed8; }
+
+.error-class-list, .result-achievements { display: flex; flex-direction: column; gap: 8px; }
+.error-class-card, .result-achievements article {
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px;
+  font-size: .82rem; color: #486581;
+}
+.error-class-card.severity-high, .error-class-card.severity-critical { border-color: #fca5a5; background: #fff7f7; }
+.error-class-card.severity-medium { border-color: #fcd34d; background: #fffbeb; }
+.error-retry-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.result-achievements article { border-color: #f4d675; background: #fffbea; color: #7a5500; }
 
 .result-actions {
   display: flex;
@@ -985,6 +1065,9 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   .negotiation-layout, .form-grid, .filters-grid { grid-template-columns: 1fr; }
   .scenario-row, .history-item { flex-direction: column; align-items: flex-start; gap: 8px; }
   .container { padding-top: 34px; }
+  .player-progress-card { grid-template-columns: 1fr; }
+  .player-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .profile-achievements { grid-column: auto; }
 }
 
 

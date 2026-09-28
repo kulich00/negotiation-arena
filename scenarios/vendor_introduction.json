@@ -1,0 +1,28 @@
+{
+  "id": "vendor-introduction",
+  "title": "Первое знакомство с поставщиком",
+  "sphere": "Procurement",
+  "topic": "Согласование пробной поставки",
+  "difficulty": "easy",
+  "opponentRole": "Менеджер поставщика",
+  "opponentTone": "Доброжелательный",
+  "playerGoal": "Согласовать условия пробной поставки",
+  "opponentGoal": "Получить нового постоянного клиента",
+  "initialMessage": "Расскажите, какие условия пробной поставки вам подходят.",
+  "rules": {
+    "maxTurns": 8,
+    "minimumTrustForAgreement": 55,
+    "minimumArgumentScoreForAgreement": 2,
+    "maximumPressureForAgreement": 4,
+    "requiresInterestExploration": true,
+    "requiresEvidence": true,
+    "proposal": {
+      "kind": "none",
+      "alternativeIds": [],
+      "preferredAlternativeIds": []
+    },
+    "trustScoreWeight": 1,
+    "argumentScoreWeight": 1,
+    "pressureScoreWeight": 1
+  }
+}

@@ -47,10 +47,17 @@ async function login() {
   }
 }
 
-function logout() {
+async function logout() {
+  const currentToken = token.value
   token.value = ''
+  error.value = ''
   localStorage.removeItem('admin_token')
-  status.value = 'Вы вышли из системы'
+  try {
+    await api.logout(currentToken)
+    status.value = 'Вы вышли из системы'
+  } catch (err) {
+    error.value = err.message || 'Не удалось отозвать сессию'
+  }
 }
 
 async function createScenario() {
@@ -227,7 +234,7 @@ function applyTemplate(tpl) {
         </form>
 
         <!-- Список созданных сценариев -->
-        <div class="existing-scenarios" v-if="store.scenarios.length">
+        <div v-if="store.scenarios.length" class="existing-scenarios">
           <h3>Существующие сценарии в системе ({{ store.scenarios.length }})</h3>
           <div class="scenarios-table">
             <div v-for="s in store.scenarios" :key="s.id" class="scenario-row">

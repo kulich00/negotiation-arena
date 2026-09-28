@@ -9,7 +9,7 @@ const selectedDifficulty = ref('all')
 const selectedSphere = ref('all')
 
 onMounted(() => {
-  store.loadScenarios()
+  store.initializeHome()
 })
 
 const availableSpheres = computed(() => {
@@ -52,6 +52,16 @@ function translateDifficulty(diff) {
       return { label: diff || 'Нормальный', class: 'badge-default' }
   }
 }
+
+function unlockHint(difficulty) {
+  if (difficulty === 'medium') {
+    return 'Получите 100/100 на лёгком уровне или завершите 2 успешные сессии'
+  }
+  if (difficulty === 'hard') {
+    return 'Получите 100/100 на среднем уровне или завершите 5 успешных сессий'
+  }
+  return `Сначала откройте уровень «${translateDifficulty(difficulty).label}»`
+}
 </script>
 
 <template>
@@ -77,6 +87,27 @@ function translateDifficulty(diff) {
           <span class="pill-val">ИИ Разбор</span>
           <span class="pill-lbl">Обратная связь</span>
         </div>
+      </div>
+    </section>
+
+    <section v-if="store.player" class="player-progress-card">
+      <div>
+        <p class="eyebrow">Профиль игрока</p>
+        <h2>{{ store.player.displayName }}</h2>
+        <p class="progress-caption">
+          Открытая сложность: <strong>{{ translateDifficulty(store.player.unlockedDifficulty).label }}</strong>
+        </p>
+      </div>
+      <div class="player-stat-grid">
+        <div><strong>{{ store.player.completedSessions }}</strong><span>завершено</span></div>
+        <div><strong>{{ store.player.successfulSessions }}</strong><span>успешно</span></div>
+        <div><strong>{{ store.player.currentWinStreak }}</strong><span>серия</span></div>
+        <div><strong>{{ store.player.achievements?.length || 0 }}</strong><span>ачивок</span></div>
+      </div>
+      <div v-if="store.player.achievements?.length" class="profile-achievements">
+        <span v-for="item in store.player.achievements" :key="item.code" class="achievement-chip">
+          🏆 {{ item.title }}
+        </span>
       </div>
     </section>
 
@@ -110,7 +141,7 @@ function translateDifficulty(diff) {
           </select>
         </div>
 
-        <div class="filter-group" v-if="availableSpheres.length > 0">
+        <div v-if="availableSpheres.length > 0" class="filter-group">
           <label for="sphere-select" class="filter-label">Сфера</label>
           <select id="sphere-select" v-model="selectedSphere">
             <option value="all">Все сферы</option>
@@ -121,7 +152,7 @@ function translateDifficulty(diff) {
         </div>
       </div>
 
-      <div class="filter-meta" v-if="store.scenarios.length > 0">
+      <div v-if="store.scenarios.length > 0" class="filter-meta">
         Найдено сценариев: <strong>{{ filteredScenarios.length }}</strong> из {{ store.scenarios.length }}
       </div>
     </section>
@@ -136,7 +167,11 @@ function translateDifficulty(diff) {
 
     <!-- Список сценариев -->
     <section v-else-if="filteredScenarios.length > 0" class="card-grid">
-      <article v-for="scenario in filteredScenarios" :key="scenario.id" class="card scenario-card">
+      <article
+        v-for="scenario in filteredScenarios"
+        :key="scenario.id"
+        :class="['card', 'scenario-card', { 'scenario-locked': !store.isDifficultyUnlocked(scenario.difficulty) }]"
+      >
         <div class="card-header">
           <span :class="['badge', translateDifficulty(scenario.difficulty).class]">
             {{ translateDifficulty(scenario.difficulty).label }}
@@ -162,17 +197,24 @@ function translateDifficulty(diff) {
         </div>
 
         <div class="card-footer">
-          <RouterLink class="button start-btn" :to="`/scenario/${scenario.id}`">
+          <RouterLink
+            v-if="store.isDifficultyUnlocked(scenario.difficulty)"
+            class="button start-btn"
+            :to="`/scenario/${scenario.id}`"
+          >
             Начать переговоры
             <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h14M12 5l7 7-7 7" />
             </svg>
           </RouterLink>
+          <div v-else class="locked-scenario-message">
+            🔒 {{ unlockHint(scenario.difficulty) }}
+          </div>
         </div>
       </article>
     </section>
 
-        <!-- История прошлых попыток пользователя -->
+    <!-- История прошлых попыток пользователя -->
     <section v-if="store.history.length > 0" class="history-card">
       <div class="history-header">
         <div>
