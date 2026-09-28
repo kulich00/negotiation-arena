@@ -105,6 +105,7 @@ function unlockHint(difficulty) {
         <div><strong>{{ store.player.achievements?.length || 0 }}</strong><span>ачивок</span></div>
       </div>
       <div v-if="store.player.achievements?.length" class="profile-achievements">
+<<<<<<< HEAD
         <span
           v-for="item in store.player.achievements"
           :key="item.code"
@@ -114,6 +115,10 @@ function unlockHint(difficulty) {
         >
           <span class="achievement-icon" aria-hidden="true">★</span>
           {{ item.title }}
+=======
+        <span v-for="item in store.player.achievements" :key="item.code" class="achievement-chip">
+          🏆 {{ item.title }}
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
         </span>
       </div>
     </section>
@@ -160,9 +165,13 @@ function unlockHint(difficulty) {
       </div>
 
       <div v-if="store.scenarios.length > 0" class="filter-meta">
+<<<<<<< HEAD
         <span>Найдено сценариев:</span>
         <strong>{{ filteredScenarios.length }}</strong>
         <span>из {{ store.scenarios.length }}</span>
+=======
+        Найдено сценариев: <strong>{{ filteredScenarios.length }}</strong> из {{ store.scenarios.length }}
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
       </div>
     </section>
 
@@ -179,12 +188,16 @@ function unlockHint(difficulty) {
       <article
         v-for="scenario in filteredScenarios"
         :key="scenario.id"
+<<<<<<< HEAD
         :class="[
           'card',
           'scenario-card',
           `difficulty-${scenario.difficulty}`,
           { 'scenario-locked': !store.isDifficultyUnlocked(scenario.difficulty) },
         ]"
+=======
+        :class="['card', 'scenario-card', { 'scenario-locked': !store.isDifficultyUnlocked(scenario.difficulty) }]"
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
       >
         <div class="card-header">
           <span :class="['badge', translateDifficulty(scenario.difficulty).class]">
@@ -222,6 +235,7 @@ function unlockHint(difficulty) {
             </svg>
           </RouterLink>
           <div v-else class="locked-scenario-message">
+<<<<<<< HEAD
             <span class="lock-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <rect x="5" y="10" width="14" height="10" rx="2" />
@@ -230,6 +244,9 @@ function unlockHint(difficulty) {
               </svg>
             </span>
             <span>{{ unlockHint(scenario.difficulty) }}</span>
+=======
+            🔒 {{ unlockHint(scenario.difficulty) }}
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
           </div>
         </div>
       </article>

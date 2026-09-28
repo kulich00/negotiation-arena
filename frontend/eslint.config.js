@@ -12,6 +12,8 @@ export default [
         document: 'readonly',
         window: 'readonly',
         fetch: 'readonly',
+        localStorage: 'readonly',
+        console: 'readonly',
       },
     },
     rules: {

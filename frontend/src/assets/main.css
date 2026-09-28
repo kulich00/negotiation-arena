@@ -182,7 +182,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   margin-top: 14px;
   font-size: 0.85rem;
   color: #627d98;
+<<<<<<< HEAD
   border-top: 1px solid #f0f4f8;
+=======
+  border-top: 1px stroke #f0f4f8;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   padding-top: 10px;
 }
 
@@ -199,7 +203,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   box-shadow: 0 20px 30px rgba(16, 42, 67, 0.12);
 }
 
+<<<<<<< HEAD
 .scenario-card.scenario-locked { opacity: 1; }
+=======
+.scenario-card.scenario-locked { opacity: .72; }
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 .scenario-card.scenario-locked:hover { transform: none; box-shadow: 0 18px 40px rgba(16, 42, 67, .08); }
 .locked-scenario-message {
   padding: 11px 14px; text-align: center; border-radius: 10px;
@@ -374,14 +382,22 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 
 .negotiation-grid {
   display: grid;
+<<<<<<< HEAD
   grid-template-columns: 250px minmax(0, 1fr) 220px;
+=======
+  grid-template-columns: 280px 1fr;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   gap: 22px;
   align-items: start;
 }
 
 @media (min-width: 1100px) {
   .negotiation-grid {
+<<<<<<< HEAD
     grid-template-columns: 280px minmax(0, 1fr) 220px;
+=======
+    grid-template-columns: 320px 1fr;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   }
 }
 
@@ -390,6 +406,7 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   display: flex;
   flex-direction: column;
   gap: 16px;
+<<<<<<< HEAD
   position: relative;
   overflow: hidden;
   background: linear-gradient(155deg, #ffffff 0%, #f6fbff 100%);
@@ -398,6 +415,9 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 .context-panel::before { content: ''; display: block; position: absolute; inset: 0 0 auto; height: 5px; background: linear-gradient(90deg, #0f766e, #38b2ac, #f59e0b); }
 .context-panel .panel-header { padding-top: 4px; }
 .context-panel .panel-header h2 { margin-bottom: 0; }
+=======
+}
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 
 .context-details {
   display: flex;
@@ -414,7 +434,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 }
 
 .ctx-group.highlight {
+<<<<<<< HEAD
   background: linear-gradient(135deg, #e8fffa, #f3fbff);
+=======
+  background: #f0f7ff;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   padding: 12px;
   border-radius: 10px;
   border: 1px solid #cce3ff;
@@ -466,6 +490,7 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   line-height: 1.35;
 }
 
+<<<<<<< HEAD
 .toolkit-panel { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 20px; }
 .toolkit-heading h2 { margin-bottom: 0; }
 .turn-summary { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: end; padding: 14px; background: #f0f7ff; border: 1px solid #cce3ff; border-radius: 14px; }
@@ -487,6 +512,8 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 .checkpoint-actions::-webkit-scrollbar-thumb { background: #705fc1; border-radius: 999px; }
 .checkpoint-actions::-webkit-scrollbar-track { background: transparent; }
 
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 /* Панель диалога */
 .dialogue-panel {
   display: flex;
@@ -504,14 +531,21 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   display: flex;
   align-items: center;
   gap: 16px;
+<<<<<<< HEAD
   flex-wrap: nowrap;
+=======
+  flex-wrap: wrap;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 }
 
 .metric-item {
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   flex: 1 1 0;
   min-width: 0;
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   gap: 8px;
   background: #f8fafc;
   padding: 6px 12px;
@@ -523,6 +557,7 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   font-size: 0.78rem;
   font-weight: 700;
   color: #486581;
+<<<<<<< HEAD
   white-space: nowrap;
 }
 
@@ -530,6 +565,12 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   flex: 1 1 auto;
   width: auto;
   min-width: 28px;
+=======
+}
+
+.progress-bg {
+  width: 60px;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   height: 8px;
   background: #cbd5e1;
   border-radius: 999px;
@@ -542,7 +583,13 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   transition: width 0.3s ease;
 }
 
+<<<<<<< HEAD
 .progress-fill { background: var(--metric-color, #dc2626); }
+=======
+.progress-fill.trust { background: #10b981; }
+.progress-fill.argument { background: #3b82f6; }
+.progress-fill.pressure { background: #f59e0b; }
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 
 .m-val {
   font-size: 0.85rem;
@@ -573,10 +620,13 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   flex-direction: column;
   gap: 14px;
 }
+<<<<<<< HEAD
 .message-list { display: flex; flex-direction: column; gap: 14px; }
 .message-enter-active, .message-leave-active { transition: opacity .28s ease, transform .28s ease; }
 .message-enter-from, .message-leave-to { opacity: 0; transform: translateY(14px); }
 .message-move { transition: transform .28s ease; }
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 
 .message-bubble {
   max-width: 82%;
@@ -764,7 +814,10 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   background: #ffffff;
   border: 2px solid #38b2ac;
 }
+<<<<<<< HEAD
 .result-panel { grid-column: 2 / -1; }
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 
 .result-header {
   text-align: center;
@@ -814,11 +867,14 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   color: #102a43;
 }
 
+<<<<<<< HEAD
 .result-section > p {
   color: #29485e;
   line-height: 1.5;
 }
 
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 .result-list {
   padding-left: 18px;
   margin: 0;
@@ -843,8 +899,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 .error-class-card.severity-medium { border-color: #fcd34d; background: #fffbeb; }
 .error-retry-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 .result-achievements article { border-color: #f4d675; background: #fffbea; color: #7a5500; }
+<<<<<<< HEAD
 .result-achievements article strong { color: #825b05; }
 .result-achievements article span { color: #5d4a1f; }
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 
 .result-actions {
   display: flex;
@@ -857,6 +916,7 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   width: 100%;
 }
 
+<<<<<<< HEAD
 .negotiation-grid.has-result {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1025,6 +1085,8 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   .negotiation-grid.has-result .result-actions { grid-template-columns: 1fr; }
 }
 
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 /* Стили панели администратора */
 .admin-page {
   max-width: 900px;
@@ -1126,7 +1188,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
 .existing-scenarios {
   margin-top: 32px;
   padding-top: 24px;
+<<<<<<< HEAD
   border-top: 2px solid #e2e8f0;
+=======
+  border-top: 2px stroke #e2e8f0;
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 }
 
 .existing-scenarios h3 {
@@ -1172,8 +1238,11 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   .negotiation-grid {
     grid-template-columns: 1fr;
   }
+<<<<<<< HEAD
   .result-panel { grid-column: auto; }
   .toolkit-panel { position: static; }
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
   .dialogue-panel {
     height: 550px;
   }
@@ -1289,6 +1358,7 @@ dl { display: grid; gap: 6px; } dt { font-weight: 800; } dd { margin: 0 0 10px; 
   .profile-achievements { grid-column: auto; }
 }
 
+<<<<<<< HEAD
 /* Темная тема сохраняет исходную иерархию, меняя поверхности и контраст. */
 [data-theme='dark'] { color-scheme: dark; background: #101b24; color: #e5f1f2; }
 [data-theme='dark'] body { background: #101b24; }
@@ -2540,6 +2610,8 @@ body {
   background: linear-gradient(90deg, #0f9f91, #6ee7d2);
 }
 
+=======
+>>>>>>> 91bc0acbd98cf8d594617e2cd1a71e866976e702
 
 
 

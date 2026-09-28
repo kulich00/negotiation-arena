@@ -8,6 +8,20 @@
   "opponentTone": "Сдержанный",
   "playerGoal": "Добиться повышения или согласовать прозрачный план пересмотра",
   "opponentGoal": "Сохранить сотрудника в рамках бюджета",
-  "initialMessage": "Вы хотели обсудить вашу компенсацию. Я слушаю."
+  "initialMessage": "Вы хотели обсудить вашу компенсацию. Я слушаю.",
+  "rules": {
+    "maxTurns": 8,
+    "minimumTrustForAgreement": 55,
+    "requiresInterestExploration": true,
+    "requiresEvidence": true,
+    "proposal": {
+      "kind": "raise_percent",
+      "maximumValue": 10,
+      "alternativeIds": ["review_in_3_months"]
+    },
+    "trustScoreWeight": 1,
+    "argumentScoreWeight": 1,
+    "pressureScoreWeight": 1
+  }
 }
 

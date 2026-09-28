@@ -1,13 +1,13 @@
 FROM node:22-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
 FROM golang:1.27-alpine AS backend
 WORKDIR /src/backend
-COPY backend/go.mod ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
 COPY --from=frontend /src/frontend/dist ./internal/webapp/dist
