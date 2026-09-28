@@ -16,6 +16,8 @@ func GenerateOpponentReply(move PlayerMove, session domain.Session, rules domain
 
 func standardOpponentReply(move PlayerMove, session domain.Session, rules domain.ScenarioRules, evaluation MoveEvaluation) string {
 	switch move.Intent {
+	case IntentNeutral:
+		return "Уточните вашу позицию: задайте вопрос, приведите факт или предложите конкретные условия."
 	case IntentAskInterest:
 		return "Для меня важно снизить риски и понять взаимную выгоду. Какие варианты вы предлагаете?"
 	case IntentPresentEvidence:

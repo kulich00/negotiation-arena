@@ -20,14 +20,39 @@ import (
 )
 
 type Handler struct {
-	service *negotiation.Service
-	auth    *adminauth.Service
-	db      *pgxpool.Pool
-	logger  *slog.Logger
+	service           *negotiation.Service
+	auth              *adminauth.Service
+	db                *pgxpool.Pool
+	logger            *slog.Logger
+	limiter           *fixedWindowLimiter
+	trustProxyHeaders bool
 }
 
-func NewHandler(service *negotiation.Service, auth *adminauth.Service, db *pgxpool.Pool, logger *slog.Logger) *Handler {
-	return &Handler{service: service, auth: auth, db: db, logger: logger}
+type HandlerOption func(*Handler)
+
+func WithRateLimit(limit int, window time.Duration) HandlerOption {
+	return func(handler *Handler) {
+		if limit > 0 && window > 0 {
+			handler.limiter = newFixedWindowLimiter(limit, window)
+		}
+	}
+}
+
+func WithTrustedProxyHeaders(enabled bool) HandlerOption {
+	return func(handler *Handler) {
+		handler.trustProxyHeaders = enabled
+	}
+}
+
+func NewHandler(service *negotiation.Service, auth *adminauth.Service, db *pgxpool.Pool, logger *slog.Logger, options ...HandlerOption) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	handler := &Handler{service: service, auth: auth, db: db, logger: logger}
+	for _, option := range options {
+		option(handler)
+	}
+	return handler
 }
 
 func (h *Handler) Router(static http.Handler) http.Handler {
@@ -59,7 +84,12 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/sessions/{id}", h.getAdminSession)
 	mux.HandleFunc("GET /api/v1/admin/session-statistics", h.getAdminSessionStatistics)
 	mux.Handle("/", static)
-	return h.recover(h.securityHeaders(h.logRequests(mux)))
+	var handler http.Handler = h.recover(mux)
+	handler = h.rateLimit(handler)
+	handler = h.logRequests(handler)
+	handler = h.requestID(handler)
+	handler = h.securityHeaders(handler)
+	return handler
 }
 
 func (h *Handler) listScenarios(w http.ResponseWriter, r *http.Request) {
@@ -523,8 +553,19 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func (h *Handler) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		h.logger.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+		writer := &statusWriter{ResponseWriter: w}
+		defer func() {
+			status := writer.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			h.logger.Info("request",
+				"requestId", writer.Header().Get("X-Request-ID"),
+				"method", r.Method, "path", r.URL.Path, "status", status,
+				"bytes", writer.bytes, "duration", time.Since(start),
+			)
+		}()
+		next.ServeHTTP(writer, r)
 	})
 }
 

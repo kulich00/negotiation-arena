@@ -85,6 +85,16 @@ function getScoreColorClass(score) {
   return 'score-low'
 }
 
+function formatDelta(value) {
+  return value > 0 ? `+${value}` : String(value)
+}
+
+async function retryFromTurn(turn) {
+  await store.forkFromTurn(Math.max(0, turn))
+  await nextTick()
+  scrollToBottom()
+}
+
 function restartNegotiation() {
   store.restart(route.params.id)
 }
@@ -138,7 +148,7 @@ function restartNegotiation() {
             </p>
           </div>
 
-          <div class="ctx-group" v-if="currentScenario.opponentGoal">
+          <div v-if="currentScenario.opponentGoal" class="ctx-group">
             <span class="ctx-label">Цель собеседника</span>
             <p class="ctx-val ctx-muted">{{ currentScenario.opponentGoal }}</p>
           </div>
@@ -158,7 +168,7 @@ function restartNegotiation() {
       <div class="panel dialogue-panel">
         <!-- Шапка диалога с динамическими метриками -->
         <div class="dialogue-header">
-          <div class="metrics-bar" v-if="store.session">
+          <div v-if="store.session" class="metrics-bar">
             <div class="metric-item">
               <span class="m-lbl">Доверие</span>
               <div class="progress-bg">
@@ -181,7 +191,7 @@ function restartNegotiation() {
               <span class="m-val">{{ store.session.argumentScore }}</span>
             </div>
 
-            <div class="metric-item" v-if="store.session.pressureScore !== undefined">
+            <div v-if="store.session.pressureScore !== undefined" class="metric-item">
               <span class="m-lbl">Давление</span>
               <div class="progress-bg">
                 <div
@@ -194,6 +204,9 @@ function restartNegotiation() {
 
             <div class="turn-pill">
               Ход: <strong>{{ store.session.turn }}</strong>
+            </div>
+            <div v-if="store.session.parentSessionId" class="branch-pill">
+              Ветка с хода {{ store.session.forkedFromTurn }}
             </div>
           </div>
         </div>
@@ -209,6 +222,34 @@ function restartNegotiation() {
               {{ item.sender === 'opponent' ? (currentScenario?.opponentRole || 'Собеседник') : 'Вы' }}
             </div>
             <div class="bubble-content">{{ item.content }}</div>
+            <div v-if="item.sender === 'player' && item.analysis" class="turn-analysis">
+              <div class="analysis-heading">
+                <strong>{{ item.analysis.summary }}</strong>
+                <span class="technique-code">{{ item.analysis.technique }}</span>
+              </div>
+              <div class="analysis-deltas">
+                <span :class="{ positive: item.analysis.trustDelta > 0, negative: item.analysis.trustDelta < 0 }">
+                  Доверие {{ formatDelta(item.analysis.trustDelta) }}
+                </span>
+                <span :class="{ positive: item.analysis.argumentDelta > 0 }">
+                  Аргументы {{ formatDelta(item.analysis.argumentDelta) }}
+                </span>
+                <span :class="{ negative: item.analysis.pressureDelta > 0 }">
+                  Давление {{ formatDelta(item.analysis.pressureDelta) }}
+                </span>
+              </div>
+              <div v-if="item.analysis.errors?.length" class="turn-errors">
+                <span
+                  v-for="error in item.analysis.errors"
+                  :key="error.code"
+                  :class="['error-chip', `severity-${error.severity}`]"
+                  :title="error.message"
+                >
+                  {{ error.label }}
+                </span>
+              </div>
+              <p class="analysis-recommendation">{{ item.analysis.recommendation }}</p>
+            </div>
           </div>
 
           <!-- Анимация печати собеседника -->
@@ -222,6 +263,19 @@ function restartNegotiation() {
 
         <!-- Поле ввода реплики -->
         <div v-if="!store.result" class="composer-area">
+          <div v-if="store.retryCheckpoints.length" class="retry-strip">
+            <span>Быстрый откат:</span>
+            <button
+              v-for="checkpoint in store.retryCheckpoints"
+              :key="checkpoint.turn"
+              type="button"
+              class="checkpoint-button"
+              :disabled="store.loading"
+              @click="retryFromTurn(checkpoint.turn)"
+            >
+              {{ checkpoint.turn === 0 ? 'С начала' : `После хода ${checkpoint.turn}` }}
+            </button>
+          </div>
           <div class="hints-row">
             <span class="hints-title">Быстрые формулировки:</span>
             <button
@@ -272,25 +326,83 @@ function restartNegotiation() {
           </div>
         </div>
 
-        <div class="result-section" v-if="store.result.strengths && store.result.strengths.length">
+        <div v-if="store.result.strengths && store.result.strengths.length" class="result-section">
           <h3>✅ Сильные стороны</h3>
           <ul class="result-list strengths">
             <li v-for="(item, i) in store.result.strengths" :key="i">{{ item }}</li>
           </ul>
         </div>
 
-        <div class="result-section" v-if="store.result.mistakes && store.result.mistakes.length">
+        <div v-if="store.result.mistakes && store.result.mistakes.length" class="result-section">
           <h3>⚠️ Ошибки и риски</h3>
           <ul class="result-list mistakes">
             <li v-for="(item, i) in store.result.mistakes" :key="i">{{ item }}</li>
           </ul>
         </div>
 
-        <div class="result-section" v-if="store.result.recommendations && store.result.recommendations.length">
+        <div v-if="store.result.recommendations && store.result.recommendations.length" class="result-section">
           <h3>💡 Рекомендации</h3>
           <ul class="result-list recommendations">
             <li v-for="(item, i) in store.result.recommendations" :key="i">{{ item }}</li>
           </ul>
+        </div>
+
+        <div v-if="store.result.analysis?.errorClasses?.length" class="result-section">
+          <h3>🎯 Классы ошибок</h3>
+          <div class="error-class-list">
+            <article
+              v-for="error in store.result.analysis.errorClasses"
+              :key="error.code"
+              :class="['error-class-card', `severity-${error.severity}`]"
+            >
+              <strong>{{ error.label }}</strong>
+              <span>{{ error.count }} раз(а), ходы: {{ error.turns.join(', ') }}</span>
+              <div class="error-retry-actions">
+                <button
+                  v-for="turn in error.turns"
+                  :key="turn"
+                  class="checkpoint-button"
+                  :disabled="store.loading"
+                  @click="retryFromTurn(turn - 1)"
+                >
+                  Переиграть ход {{ turn }}
+                </button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div v-if="store.result.analysis?.bestMove" class="result-section">
+          <h3>⭐ Лучший ход</h3>
+          <p>
+            Ход {{ store.result.analysis.bestMove.turn }}:
+            {{ store.result.analysis.bestMove.summary }}
+          </p>
+        </div>
+
+        <div v-if="store.result.achievements?.length" class="result-section">
+          <h3>🏆 Полученные достижения</h3>
+          <div class="result-achievements">
+            <article v-for="achievement in store.result.achievements" :key="achievement.code">
+              <strong>{{ achievement.title }}</strong>
+              <span>{{ achievement.description }}</span>
+            </article>
+          </div>
+        </div>
+
+        <div v-if="store.retryCheckpoints.length" class="result-section">
+          <h3>↩ Быстрая работа над ошибками</h3>
+          <div class="error-retry-actions">
+            <button
+              v-for="checkpoint in store.retryCheckpoints"
+              :key="checkpoint.turn"
+              class="checkpoint-button"
+              :disabled="store.loading"
+              @click="retryFromTurn(checkpoint.turn)"
+            >
+              {{ checkpoint.turn === 0 ? 'Начать заново' : `Продолжить после хода ${checkpoint.turn}` }}
+            </button>
+          </div>
         </div>
 
         <div class="result-actions">

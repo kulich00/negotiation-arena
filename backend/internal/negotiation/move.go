@@ -12,6 +12,7 @@ import (
 type MoveIntent string
 
 const (
+	IntentNeutral            MoveIntent = "neutral"
 	IntentAskInterest        MoveIntent = "ask_interest"
 	IntentPresentEvidence    MoveIntent = "present_evidence"
 	IntentAskSituation       MoveIntent = "ask_situation"
@@ -68,7 +69,7 @@ func ValidateMove(move PlayerMove, rules domain.ScenarioRules) error {
 		if move.Proposal != nil && freeFormProposal {
 			return fmt.Errorf("%w: proposal details are not supported by this scenario", ErrInvalidMove)
 		}
-	case IntentAskInterest, IntentPresentEvidence, IntentAskSituation, IntentIdentifyProblem, IntentExploreImplication, IntentClarifyNeedPayoff, IntentStateBATNA, IntentAccept, IntentPressure:
+	case IntentNeutral, IntentAskInterest, IntentPresentEvidence, IntentAskSituation, IntentIdentifyProblem, IntentExploreImplication, IntentClarifyNeedPayoff, IntentStateBATNA, IntentAccept, IntentPressure:
 		if move.Proposal != nil {
 			return fmt.Errorf("%w: proposal is only allowed for propose", ErrInvalidMove)
 		}
@@ -123,6 +124,9 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 	evaluation.State.StructuredMovesUsed = true
 
 	switch move.Intent {
+	case IntentNeutral:
+		// A neutral or unclear phrase advances the turn without rewarding or
+		// penalizing it. Hostile phrases are classified separately as pressure.
 	case IntentAskInterest:
 		evaluation.TrustDelta = 2
 		evaluation.State.InterestsExplored = true

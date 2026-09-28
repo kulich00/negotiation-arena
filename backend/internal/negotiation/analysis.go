@@ -18,6 +18,10 @@ func AnalyzeStructuredMove(move PlayerMove, before domain.SessionState, rules do
 	}
 
 	switch move.Intent {
+	case IntentNeutral:
+		analysis.Technique = "neutral_statement"
+		analysis.Summary = "Реплика не содержит конкретного переговорного действия и не изменила показатели."
+		analysis.Recommendation = "Задайте открытый вопрос, приведите проверяемый факт или предложите конкретные условия."
 	case IntentAskInterest:
 		analysis.Technique = "harvard_interests"
 		analysis.Summary = "Вы исследовали интересы второй стороны и укрепили доверие."

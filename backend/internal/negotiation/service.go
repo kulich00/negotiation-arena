@@ -15,9 +15,10 @@ import (
 )
 
 type Service struct {
-	repo           repository.Repository
-	provider       llm.Provider
-	replyGenerator llm.ReplyGenerator
+	repo            repository.Repository
+	provider        llm.Provider
+	replyGenerator  llm.ReplyGenerator
+	moveInterpreter llm.MoveInterpreter
 }
 
 type ServiceOption func(*Service)
@@ -27,6 +28,12 @@ func WithReplyGenerator(generator llm.ReplyGenerator) ServiceOption {
 		if generator != nil {
 			service.replyGenerator = generator
 		}
+	}
+}
+
+func WithMoveInterpreter(interpreter llm.MoveInterpreter) ServiceOption {
+	return func(service *Service) {
+		service.moveInterpreter = interpreter
 	}
 }
 
@@ -309,26 +316,36 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	if session.Turn >= scenario.Rules.MaxTurns {
 		return TurnResult{}, ErrTurnLimitReached
 	}
+	effectiveMove := move
+	interpretationFailed := false
+	if move == nil && s.moveInterpreter != nil {
+		interpreted, err := s.interpretMove(ctx, message, session, scenario)
+		if err != nil {
+			interpretationFailed = true
+		} else if interpreted != nil {
+			effectiveMove = interpreted
+		}
+	}
 
 	var (
 		evaluation MoveEvaluation
 		reply      string
 		analysis   domain.TurnAnalysis
 	)
-	if move != nil {
-		if err := ValidateMove(*move, scenario.Rules); err != nil {
+	if effectiveMove != nil {
+		if err := ValidateMove(*effectiveMove, scenario.Rules); err != nil {
 			return TurnResult{}, err
 		}
-		if move.Intent == IntentAccept && !session.State.OfferMade {
+		if effectiveMove.Intent == IntentAccept && !session.State.OfferMade {
 			return TurnResult{}, fmtInvalidMove("there is no offer to accept")
 		}
-		if move.Intent == IntentAccept && session.State.LastOfferQuality == domain.OfferQualityRejected {
+		if effectiveMove.Intent == IntentAccept && session.State.LastOfferQuality == domain.OfferQualityRejected {
 			return TurnResult{}, fmtInvalidMove("the opponent rejected the current offer")
 		}
-		evaluation = EvaluateMove(*move, session.State, scenario.Rules)
-		evaluation = ApplyOpponentBehavior(*move, session.Turn+1, scenario.Rules, evaluation)
-		reply = GenerateOpponentReply(*move, session, scenario.Rules, evaluation)
-		analysis = AnalyzeStructuredMove(*move, session.State, scenario.Rules, evaluation)
+		evaluation = EvaluateMove(*effectiveMove, session.State, scenario.Rules)
+		evaluation = ApplyOpponentBehavior(*effectiveMove, session.Turn+1, scenario.Rules, evaluation)
+		reply = GenerateOpponentReply(*effectiveMove, session, scenario.Rules, evaluation)
+		analysis = AnalyzeStructuredMove(*effectiveMove, session.State, scenario.Rules, evaluation)
 	} else {
 		providerAnalysis, err := s.provider.Analyze(ctx, llm.AnalysisRequest{Message: message, Turn: session.Turn, TrustScore: session.TrustScore, ArgumentScore: session.ArgumentScore})
 		if err != nil {
@@ -348,13 +365,15 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 			analysis.OpponentReaction = &reaction
 		}
 	}
-	reply = s.generateReply(ctx, reply, message, session, scenario, evaluation.State)
+	if !interpretationFailed {
+		reply = s.generateReply(ctx, reply, message, session, scenario, evaluation.State)
+	}
 	expectedTurn := session.Turn
 	session.Turn++
 	session.TrustScore = clamp(session.TrustScore + evaluation.TrustDelta)
 	session.ArgumentScore = clamp(session.ArgumentScore + evaluation.ArgumentDelta)
 	session.PressureScore = clamp(session.PressureScore + evaluation.PressureDelta)
-	if move != nil || evaluation.OpponentReaction != nil {
+	if effectiveMove != nil || evaluation.OpponentReaction != nil {
 		session.State = evaluation.State
 	}
 	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, reply, analysis); err != nil {
@@ -372,17 +391,39 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	return turnResult, nil
 }
 
-func (s *Service) generateReply(ctx context.Context, baseReply, playerMessage string, session domain.Session, scenario domain.Scenario, state domain.SessionState) string {
-	history := make([]llm.ConversationMessage, 0, 8)
-	if messages, err := s.repo.Messages(ctx, session.ID); err == nil {
-		start := len(messages) - 8
-		if start < 0 {
-			start = 0
-		}
-		for _, message := range messages[start:] {
-			history = append(history, llm.ConversationMessage{Role: message.Sender, Text: message.Content})
+func (s *Service) interpretMove(ctx context.Context, message string, session domain.Session, scenario domain.Scenario) (*PlayerMove, error) {
+	rules := scenario.Rules.WithDefaults()
+	interpretation, err := s.moveInterpreter.InterpretMove(ctx, llm.InterpretationRequest{
+		Message: message, ScenarioTopic: scenario.Topic, PlayerGoal: scenario.PlayerGoal,
+		OpponentRole: scenario.OpponentRole, Phase: string(session.State.Phase),
+		OfferMade: session.State.OfferMade, ProposalKind: rules.Proposal.Kind,
+		ProposalMaximum:      rules.Proposal.InputMaximumValue,
+		ProposalAlternatives: append([]string{}, rules.Proposal.AlternativeIDs...),
+		ConversationHistory:  s.recentConversation(ctx, session.ID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	move := PlayerMove{Content: message, Intent: MoveIntent(interpretation.Intent)}
+	if move.Intent == IntentPropose && rules.Proposal.Kind != "none" {
+		switch {
+		case interpretation.AlternativeID != "":
+			move.Proposal = &MoveProposal{AlternativeID: interpretation.AlternativeID}
+		case interpretation.ProposalValue > 0:
+			move.Proposal = &MoveProposal{Kind: rules.Proposal.Kind, Value: interpretation.ProposalValue}
 		}
 	}
+	if err := ValidateMove(move, rules); err != nil {
+		return nil, nil
+	}
+	if move.Intent == IntentAccept && (!session.State.OfferMade || session.State.LastOfferQuality == domain.OfferQualityRejected) {
+		return nil, nil
+	}
+	return &move, nil
+}
+
+func (s *Service) generateReply(ctx context.Context, baseReply, playerMessage string, session domain.Session, scenario domain.Scenario, state domain.SessionState) string {
+	history := s.recentConversation(ctx, session.ID)
 	reply, err := s.replyGenerator.GenerateReply(ctx, llm.ReplyRequest{
 		BaseReply: baseReply, PlayerMessage: playerMessage,
 		ScenarioTopic: scenario.Topic, OpponentRole: scenario.OpponentRole,
@@ -394,6 +435,20 @@ func (s *Service) generateReply(ctx context.Context, baseReply, playerMessage st
 		return baseReply
 	}
 	return strings.TrimSpace(reply)
+}
+
+func (s *Service) recentConversation(ctx context.Context, sessionID string) []llm.ConversationMessage {
+	history := make([]llm.ConversationMessage, 0, 8)
+	if messages, err := s.repo.Messages(ctx, sessionID); err == nil {
+		start := len(messages) - 8
+		if start < 0 {
+			start = 0
+		}
+		for _, message := range messages[start:] {
+			history = append(history, llm.ConversationMessage{Role: message.Sender, Text: message.Content})
+		}
+	}
+	return history
 }
 
 func legacyBehaviorIntent(result llm.AnalysisResult) MoveIntent {

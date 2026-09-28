@@ -13,12 +13,19 @@ async function request(path, options = {}) {
 
 export const api = {
   listScenarios: () => request('/api/v1/scenarios'),
-  startSession: (scenarioId) => request('/api/v1/sessions', {
+  listAchievements: () => request('/api/v1/achievements'),
+  createPlayer: (displayName = 'Игрок') => request('/api/v1/players', {
     method: 'POST',
-    body: JSON.stringify({ scenarioId }),
+    body: JSON.stringify({ displayName }),
+  }),
+  getPlayer: (playerId) => request(`/api/v1/players/${playerId}`),
+  startSession: (scenarioId, playerId = '') => request('/api/v1/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ scenarioId, playerId }),
   }),
   getSession: (sessionId) => request(`/api/v1/sessions/${sessionId}`),
   getMessages: (sessionId) => request(`/api/v1/sessions/${sessionId}/messages`),
+  getCheckpoints: (sessionId) => request(`/api/v1/sessions/${sessionId}/checkpoints`),
   getResult: (sessionId) => request(`/api/v1/sessions/${sessionId}/result`),
   sendMessage: (sessionId, content) => request(`/api/v1/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -26,6 +33,10 @@ export const api = {
   }),
   finishSession: (sessionId) => request(`/api/v1/sessions/${sessionId}/finish`, {
     method: 'POST',
+  }),
+  forkSession: (sessionId, turn) => request(`/api/v1/sessions/${sessionId}/fork`, {
+    method: 'POST',
+    body: JSON.stringify({ turn }),
   }),
   login: (email, password) => request('/api/v1/admin/login', {
     method: 'POST',

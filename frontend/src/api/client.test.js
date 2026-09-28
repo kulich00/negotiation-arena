@@ -28,5 +28,29 @@ describe('api client', () => {
       }),
     }))
   })
+
+  it('starts a session for the local player', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'session-1' }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.startSession('vendor-introduction', 'player-1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/sessions', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ scenarioId: 'vendor-introduction', playerId: 'player-1' }),
+    }))
+  })
+
+  it('creates a branch from a checkpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'child-1' }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.forkSession('parent-1', 2)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/sessions/parent-1/fork', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ turn: 2 }),
+    }))
+  })
 })
 

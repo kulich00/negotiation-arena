@@ -421,19 +421,25 @@ func (r *PostgresRepository) Finish(ctx context.Context, s domain.Session, resul
 		if s.FinishedAt != nil {
 			finishedAt = *s.FinishedAt
 		}
-		success := successfulOutcome(result.OutcomeCode)
+		var player domain.PlayerProfile
+		err := tx.QueryRow(ctx, `SELECT completed_sessions,successful_sessions,current_win_streak,best_win_streak,unlocked_difficulty
+			FROM player_profiles WHERE id=$1 FOR UPDATE`, s.PlayerID).Scan(
+			&player.CompletedSessions, &player.SuccessfulSessions, &player.CurrentWinStreak,
+			&player.BestWinStreak, &player.UnlockedDifficulty,
+		)
+		if err != nil {
+			return notFound(err)
+		}
+		var completedDifficulty string
+		if err := tx.QueryRow(ctx, `SELECT difficulty FROM scenarios WHERE id=$1`, s.ScenarioID).Scan(&completedDifficulty); err != nil {
+			return notFound(err)
+		}
+		updatePlayerProgress(&player, result, &finishedAt, completedDifficulty)
 		command, err := tx.Exec(ctx, `UPDATE player_profiles SET
-			completed_sessions=completed_sessions+1,
-			successful_sessions=successful_sessions+CASE WHEN $2 THEN 1 ELSE 0 END,
-			current_win_streak=CASE WHEN $2 THEN current_win_streak+1 ELSE 0 END,
-			best_win_streak=GREATEST(best_win_streak,CASE WHEN $2 THEN current_win_streak+1 ELSE 0 END),
-			unlocked_difficulty=CASE
-				WHEN successful_sessions+CASE WHEN $2 THEN 1 ELSE 0 END>=5 THEN 'hard'
-				WHEN successful_sessions+CASE WHEN $2 THEN 1 ELSE 0 END>=2 THEN 'medium'
-				ELSE 'easy'
-			END,
-			updated_at=$3
-			WHERE id=$1`, s.PlayerID, success, finishedAt)
+			completed_sessions=$2,successful_sessions=$3,current_win_streak=$4,
+			best_win_streak=$5,unlocked_difficulty=$6,updated_at=$7 WHERE id=$1`,
+			s.PlayerID, player.CompletedSessions, player.SuccessfulSessions, player.CurrentWinStreak,
+			player.BestWinStreak, player.UnlockedDifficulty, finishedAt)
 		if err != nil {
 			return err
 		}

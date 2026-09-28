@@ -234,7 +234,7 @@ function applyTemplate(tpl) {
         </form>
 
         <!-- Список созданных сценариев -->
-        <div class="existing-scenarios" v-if="store.scenarios.length">
+        <div v-if="store.scenarios.length" class="existing-scenarios">
           <h3>Существующие сценарии в системе ({{ store.scenarios.length }})</h3>
           <div class="scenarios-table">
             <div v-for="s in store.scenarios" :key="s.id" class="scenario-row">

@@ -23,8 +23,12 @@ import (
 
 func main() {
 	cfg := config.Load()
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	ctx := context.Background()
+	logger := newLogger(cfg.LogLevel)
+	if err := cfg.Validate(); err != nil {
+		logger.Error("configuration validation failed", "error", err)
+		os.Exit(1)
+	}
+	ctx, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
 
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -48,7 +52,11 @@ func main() {
 		logger.Error("LLM configuration failed", "error", err)
 		os.Exit(1)
 	}
-	service := negotiation.NewService(repo, llm.NewMockProvider(), negotiation.WithReplyGenerator(replyGenerator))
+	serviceOptions := []negotiation.ServiceOption{negotiation.WithReplyGenerator(replyGenerator)}
+	if interpreter, ok := replyGenerator.(llm.MoveInterpreter); ok {
+		serviceOptions = append(serviceOptions, negotiation.WithMoveInterpreter(interpreter))
+	}
+	service := negotiation.NewService(repo, llm.NewMockProvider(), serviceOptions...)
 	if err := service.SeedDefaults(ctx); err != nil {
 		logger.Error("scenario initialization failed", "error", err)
 		os.Exit(1)
@@ -62,8 +70,13 @@ func main() {
 		logger.Error("admin initialization failed", "error", err)
 		os.Exit(1)
 	}
+	cancelStartup()
 
-	handler := httpapi.NewHandler(service, authService, db, logger)
+	handler := httpapi.NewHandler(
+		service, authService, db, logger,
+		httpapi.WithRateLimit(cfg.APIRateLimit, cfg.APIRateWindow),
+		httpapi.WithTrustedProxyHeaders(cfg.TrustProxyHeaders),
+	)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler.Router(webapp.Handler()),
@@ -92,6 +105,19 @@ func main() {
 	}
 }
 
+func newLogger(configuredLevel string) *slog.Logger {
+	level := slog.LevelInfo
+	switch strings.ToLower(strings.TrimSpace(configuredLevel)) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+}
+
 func configureReplyGenerator(cfg config.Config, logger *slog.Logger) (llm.ReplyGenerator, error) {
 	passthrough := llm.NewPassthroughReplyGenerator()
 	switch strings.ToLower(strings.TrimSpace(cfg.LLMProvider)) {
@@ -99,13 +125,14 @@ func configureReplyGenerator(cfg config.Config, logger *slog.Logger) (llm.ReplyG
 		return passthrough, nil
 	case "gemini":
 		generator, err := llm.NewGeminiGenerator(llm.GeminiConfig{
-			APIKey: cfg.LLMAPIKey,
-			Model:  cfg.LLMModel,
-			Client: &http.Client{Timeout: cfg.LLMTimeout},
+			APIKeys: cfg.LLMAPIKeys,
+			Model:   cfg.LLMModel,
+			Client:  &http.Client{Timeout: cfg.LLMTimeout},
 		})
 		if err != nil {
 			return nil, err
 		}
+		logger.Info("Gemini enabled", "model", cfg.LLMModel, "apiKeyCount", generator.APIKeyCount())
 		return llm.NewFallbackReplyGenerator(generator, passthrough, logger), nil
 	default:
 		return nil, fmt.Errorf("unsupported LLM_PROVIDER %q (use mock or gemini)", cfg.LLMProvider)

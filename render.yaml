@@ -21,6 +21,12 @@ services:
         value: 5
       - key: ADMIN_LOGIN_WINDOW
         value: 15m
+      - key: API_RATE_LIMIT
+        value: 120
+      - key: API_RATE_WINDOW
+        value: 1m
+      - key: TRUST_PROXY_HEADERS
+        value: true
       - key: LLM_PROVIDER
         value: mock
 

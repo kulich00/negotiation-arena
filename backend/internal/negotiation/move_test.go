@@ -24,6 +24,7 @@ func TestValidateMove(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "ask interests", move: PlayerMove{Content: "Что для вас важно?", Intent: IntentAskInterest}},
+		{name: "neutral", move: PlayerMove{Content: "Здравствуйте", Intent: IntentNeutral}},
 		{name: "ask situation", move: PlayerMove{Content: "Как устроен текущий процесс?", Intent: IntentAskSituation}},
 		{name: "identify problem", move: PlayerMove{Content: "Что мешает получить результат?", Intent: IntentIdentifyProblem}},
 		{name: "explore implication", move: PlayerMove{Content: "К чему приведёт задержка?", Intent: IntentExploreImplication}},
@@ -80,6 +81,11 @@ func TestEvaluateMoveUpdatesStateAndScores(t *testing.T) {
 	pressure := EvaluateMove(PlayerMove{Intent: IntentPressure}, proposal.State, rules)
 	if pressure.TrustDelta != -2 || pressure.PressureDelta != 2 || pressure.State.Phase != domain.PhaseBargaining {
 		t.Fatalf("unexpected pressure evaluation: %+v", pressure)
+	}
+
+	neutral := EvaluateMove(PlayerMove{Intent: IntentNeutral}, state, rules)
+	if neutral.TrustDelta != 0 || neutral.ArgumentDelta != 0 || neutral.PressureDelta != 0 {
+		t.Fatalf("neutral move changed scores: %+v", neutral)
 	}
 }
 

@@ -405,6 +405,51 @@ func TestProcessMoveFallsBackWhenReplyGeneratorFails(t *testing.T) {
 	}
 }
 
+func TestProcessMessageUsesSemanticPressureInterpretation(t *testing.T) {
+	service := NewService(
+		repository.NewMemoryRepository(), llm.NewMockProvider(),
+		WithMoveInterpreter(staticMoveInterpreter{interpretation: llm.MoveInterpretation{Intent: "pressure"}}),
+	)
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "vendor-introduction")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.ProcessMessage(context.Background(), session.ID, "Сделайте как я сказал, иначе пожалеете")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Session.TrustScore != 48 || turn.Session.PressureScore != 2 {
+		t.Fatalf("pressure did not reduce trust: %+v", turn.Session)
+	}
+	if turn.Analysis.Intent != "pressure" || turn.Analysis.Technique != "competitive_pressure" {
+		t.Fatalf("unexpected semantic analysis: %+v", turn.Analysis)
+	}
+}
+
+func TestProcessMessageFallsBackToLocalAnalysisWhenInterpretationFails(t *testing.T) {
+	service := NewService(
+		repository.NewMemoryRepository(), llm.NewMockProvider(),
+		WithMoveInterpreter(failingMoveInterpreter{}),
+	)
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "vendor-introduction")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.ProcessMessage(context.Background(), session.ID, "Вы обязаны выполнить требование")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Session.TrustScore != 49 || turn.Analysis.Intent != "legacy" {
+		t.Fatalf("local fallback was not used: %+v", turn)
+	}
+}
+
 func TestProcessMovePersistsSPINAndBATNAState(t *testing.T) {
 	service := NewService(repository.NewMemoryRepository(), failingProvider{})
 	if err := service.SeedDefaults(context.Background()); err != nil {
@@ -461,4 +506,18 @@ type failingReplyGenerator struct{}
 
 func (failingReplyGenerator) GenerateReply(context.Context, llm.ReplyRequest) (string, error) {
 	return "", errors.New("LLM unavailable")
+}
+
+type staticMoveInterpreter struct {
+	interpretation llm.MoveInterpretation
+}
+
+func (interpreter staticMoveInterpreter) InterpretMove(context.Context, llm.InterpretationRequest) (llm.MoveInterpretation, error) {
+	return interpreter.interpretation, nil
+}
+
+type failingMoveInterpreter struct{}
+
+func (failingMoveInterpreter) InterpretMove(context.Context, llm.InterpretationRequest) (llm.MoveInterpretation, error) {
+	return llm.MoveInterpretation{}, errors.New("LLM unavailable")
 }

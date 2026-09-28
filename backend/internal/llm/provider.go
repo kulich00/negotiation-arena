@@ -50,6 +50,33 @@ type ReplyGenerator interface {
 	GenerateReply(context.Context, ReplyRequest) (string, error)
 }
 
+// InterpretationRequest contains only the context needed to classify a free
+// form player message into the engine's finite set of moves.
+type InterpretationRequest struct {
+	Message              string                `json:"message"`
+	ScenarioTopic        string                `json:"scenarioTopic"`
+	PlayerGoal           string                `json:"playerGoal"`
+	OpponentRole         string                `json:"opponentRole"`
+	Phase                string                `json:"phase"`
+	OfferMade            bool                  `json:"offerMade"`
+	ProposalKind         string                `json:"proposalKind"`
+	ProposalMaximum      int                   `json:"proposalMaximum"`
+	ProposalAlternatives []string              `json:"proposalAlternatives,omitempty"`
+	ConversationHistory  []ConversationMessage `json:"conversationHistory,omitempty"`
+}
+
+type MoveInterpretation struct {
+	Intent        string `json:"intent"`
+	ProposalValue int    `json:"proposalValue"`
+	AlternativeID string `json:"alternativeId"`
+}
+
+// MoveInterpreter classifies natural language. Its output must still pass the
+// negotiation engine's validation before it can affect scores or state.
+type MoveInterpreter interface {
+	InterpretMove(context.Context, InterpretationRequest) (MoveInterpretation, error)
+}
+
 type PassthroughReplyGenerator struct{}
 
 func NewPassthroughReplyGenerator() PassthroughReplyGenerator {

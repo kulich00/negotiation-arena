@@ -307,7 +307,11 @@ func (r *MemoryRepository) Finish(_ context.Context, session domain.Session, res
 		if !exists {
 			return ErrNotFound
 		}
-		updatePlayerProgress(&player, result, session.FinishedAt)
+		scenario, exists := r.scenarios[session.ScenarioID]
+		if !exists {
+			return ErrNotFound
+		}
+		updatePlayerProgress(&player, result, session.FinishedAt, scenario.Difficulty)
 		r.players[player.ID] = clonePlayer(player)
 	}
 	r.sessions[session.ID] = cloneSession(session)
@@ -493,7 +497,7 @@ func cloneResult(result domain.Result) domain.Result {
 	return result
 }
 
-func updatePlayerProgress(player *domain.PlayerProfile, result domain.Result, finishedAt *time.Time) {
+func updatePlayerProgress(player *domain.PlayerProfile, result domain.Result, finishedAt *time.Time, completedDifficulty string) {
 	now := time.Now().UTC()
 	if finishedAt != nil {
 		now = *finishedAt
@@ -508,7 +512,13 @@ func updatePlayerProgress(player *domain.PlayerProfile, result domain.Result, fi
 	} else {
 		player.CurrentWinStreak = 0
 	}
-	player.UnlockedDifficulty = unlockedDifficulty(player.SuccessfulSessions)
+	player.UnlockedDifficulty = unlockedDifficulty(
+		player.UnlockedDifficulty,
+		player.SuccessfulSessions,
+		completedDifficulty,
+		result.FinalScore,
+		successfulOutcome(result.OutcomeCode),
+	)
 	player.UpdatedAt = now
 
 	existing := make(map[string]bool, len(player.Achievements))
@@ -531,13 +541,49 @@ func successfulOutcome(code string) bool {
 	return code == "mutual_gain" || code == "advantageous_agreement" || code == "compromise"
 }
 
-func unlockedDifficulty(successfulSessions int) string {
-	switch {
-	case successfulSessions >= 5:
-		return "hard"
-	case successfulSessions >= 2:
+func unlockedDifficulty(current string, successfulSessions int, completedDifficulty string, finalScore int, successful bool) string {
+	target := "easy"
+	if successfulSessions >= 5 {
+		target = "hard"
+	} else if successfulSessions >= 2 {
+		target = "medium"
+	}
+	if successful && finalScore >= 100 {
+		target = higherDifficulty(target, nextDifficulty(completedDifficulty))
+	}
+	return higherDifficulty(current, target)
+}
+
+func nextDifficulty(completed string) string {
+	switch completed {
+	case "easy":
 		return "medium"
+	case "medium", "hard":
+		return "hard"
 	default:
 		return "easy"
+	}
+}
+
+func higherDifficulty(first, second string) string {
+	if difficultyRank(second) > difficultyRank(first) {
+		return second
+	}
+	if difficultyRank(first) == 0 {
+		return "easy"
+	}
+	return first
+}
+
+func difficultyRank(difficulty string) int {
+	switch difficulty {
+	case "easy":
+		return 1
+	case "medium":
+		return 2
+	case "hard":
+		return 3
+	default:
+		return 0
 	}
 }
