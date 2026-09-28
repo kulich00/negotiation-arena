@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,11 +37,17 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	})
 	mux.HandleFunc("GET /health/ready", h.ready)
 	mux.HandleFunc("GET /api/v1/scenarios", h.listScenarios)
+	mux.HandleFunc("GET /api/v1/achievements", h.listAchievements)
+	mux.HandleFunc("POST /api/v1/players", h.createPlayer)
+	mux.HandleFunc("GET /api/v1/players/{id}", h.getPlayer)
 	mux.HandleFunc("POST /api/v1/sessions", h.startSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", h.getSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", h.getMessages)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/checkpoints", h.getCheckpoints)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/messages", h.processMessage)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/finish", h.finishSession)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/abandon", h.abandonSession)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/fork", h.forkSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/result", h.getResult)
 	mux.HandleFunc("POST /api/v1/admin/login", h.login)
 	mux.HandleFunc("POST /api/v1/admin/logout", h.logout)
@@ -48,6 +55,9 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/scenarios", h.createScenario)
 	mux.HandleFunc("PUT /api/v1/admin/scenarios/{id}", h.updateScenario)
 	mux.HandleFunc("DELETE /api/v1/admin/scenarios/{id}", h.deleteScenario)
+	mux.HandleFunc("GET /api/v1/admin/sessions", h.listAdminSessions)
+	mux.HandleFunc("GET /api/v1/admin/sessions/{id}", h.getAdminSession)
+	mux.HandleFunc("GET /api/v1/admin/session-statistics", h.getAdminSessionStatistics)
 	mux.Handle("/", static)
 	return h.recover(h.securityHeaders(h.logRequests(mux)))
 }
@@ -63,6 +73,7 @@ func (h *Handler) listScenarios(w http.ResponseWriter, r *http.Request) {
 		public = append(public, publicScenario{
 			ID: scenario.ID, Title: scenario.Title, Sphere: scenario.Sphere,
 			Topic: scenario.Topic, Difficulty: scenario.Difficulty,
+			OpponentMode: scenario.Rules.WithDefaults().Behavior.Mode,
 			OpponentRole: scenario.OpponentRole, OpponentTone: scenario.OpponentTone,
 			PlayerGoal: scenario.PlayerGoal, InitialMessage: scenario.InitialMessage,
 		})
@@ -77,6 +88,7 @@ type publicScenario struct {
 	Sphere         string `json:"sphere"`
 	Topic          string `json:"topic"`
 	Difficulty     string `json:"difficulty"`
+	OpponentMode   string `json:"opponentMode"`
 	OpponentRole   string `json:"opponentRole"`
 	OpponentTone   string `json:"opponentTone"`
 	PlayerGoal     string `json:"playerGoal"`
@@ -95,16 +107,53 @@ func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listAchievements(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.service.Achievements())
+}
+
+func (h *Handler) createPlayer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ScenarioID string `json:"scenarioId"`
+		DisplayName string `json:"displayName"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	session, err := h.service.StartSession(r.Context(), body.ScenarioID)
+	player, err := h.service.CreatePlayer(r.Context(), body.DisplayName)
 	if err != nil {
-		writeStorageError(w, err, "scenario not found")
+		if errors.Is(err, negotiation.ErrInvalidPlayer) {
+			writeError(w, http.StatusBadRequest, "invalid player")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not create player")
+		return
+	}
+	writeJSON(w, http.StatusCreated, player)
+}
+
+func (h *Handler) getPlayer(w http.ResponseWriter, r *http.Request) {
+	player, err := h.service.Player(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStorageError(w, err, "player not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, player)
+}
+
+func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ScenarioID string `json:"scenarioId"`
+		PlayerID   string `json:"playerId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	session, err := h.service.StartSessionForPlayer(r.Context(), body.ScenarioID, body.PlayerID)
+	if err != nil {
+		if errors.Is(err, negotiation.ErrDifficultyLocked) {
+			writeError(w, http.StatusForbidden, "difficulty locked")
+			return
+		}
+		writeStorageError(w, err, "scenario or player not found")
 		return
 	}
 	writeJSON(w, http.StatusCreated, session)
@@ -126,6 +175,15 @@ func (h *Handler) getMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, messages)
+}
+
+func (h *Handler) getCheckpoints(w http.ResponseWriter, r *http.Request) {
+	checkpoints, err := h.service.Checkpoints(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStorageError(w, err, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, checkpoints)
 }
 
 func (h *Handler) processMessage(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +223,38 @@ func (h *Handler) finishSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) abandonSession(w http.ResponseWriter, r *http.Request) {
+	result, err := h.service.Abandon(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStorageError(w, err, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) forkSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Turn *int `json:"turn"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Turn == nil {
+		writeError(w, http.StatusBadRequest, "turn is required")
+		return
+	}
+	session, err := h.service.ForkSession(r.Context(), r.PathValue("id"), *body.Turn)
+	if errors.Is(err, negotiation.ErrInvalidFork) {
+		writeError(w, http.StatusBadRequest, "invalid fork point")
+		return
+	}
+	if err != nil {
+		writeStorageError(w, err, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusCreated, session)
 }
 
 func (h *Handler) getResult(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +385,78 @@ func (h *Handler) deleteScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listAdminSessions(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	filter, ok := sessionFilter(w, r)
+	if !ok {
+		return
+	}
+	page, err := h.service.ListSessions(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load sessions")
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (h *Handler) getAdminSession(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	detail, err := h.service.SessionDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStorageError(w, err, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) getAdminSessionStatistics(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	statistics, err := h.service.SessionStatistics(r.Context(), strings.TrimSpace(r.URL.Query().Get("scenarioId")))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load session statistics")
+		return
+	}
+	writeJSON(w, http.StatusOK, statistics)
+}
+
+func sessionFilter(w http.ResponseWriter, r *http.Request) (repository.SessionFilter, bool) {
+	filter := repository.SessionFilter{
+		Status:     strings.TrimSpace(r.URL.Query().Get("status")),
+		ScenarioID: strings.TrimSpace(r.URL.Query().Get("scenarioId")),
+	}
+	if filter.Status != "" && filter.Status != domain.SessionStatusActive && filter.Status != domain.SessionStatusFinished && filter.Status != domain.SessionStatusAbandoned {
+		writeError(w, http.StatusBadRequest, "invalid session status")
+		return repository.SessionFilter{}, false
+	}
+	var ok bool
+	if filter.Limit, ok = nonNegativeQueryInt(w, r, "limit"); !ok {
+		return repository.SessionFilter{}, false
+	}
+	if filter.Offset, ok = nonNegativeQueryInt(w, r, "offset"); !ok {
+		return repository.SessionFilter{}, false
+	}
+	return filter.WithDefaults(), true
+}
+
+func nonNegativeQueryInt(w http.ResponseWriter, r *http.Request, name string) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		writeError(w, http.StatusBadRequest, "invalid "+name)
+		return 0, false
+	}
+	return value, true
 }
 
 func (h *Handler) authorizeAdmin(w http.ResponseWriter, r *http.Request) bool {

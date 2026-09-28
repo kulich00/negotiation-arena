@@ -21,7 +21,10 @@ type Config struct {
 }
 
 func Load() Config {
-	seconds, _ := strconv.Atoi(getenv("LLM_TIMEOUT_SECONDS", "15"))
+	seconds, err := strconv.Atoi(getenv("LLM_TIMEOUT_SECONDS", "15"))
+	if err != nil || seconds <= 0 {
+		seconds = 15
+	}
 	adminSessionTTL, err := time.ParseDuration(getenv("ADMIN_SESSION_TTL", "12h"))
 	if err != nil || adminSessionTTL <= 0 {
 		adminSessionTTL = 12 * time.Hour
@@ -43,8 +46,8 @@ func Load() Config {
 		AdminLoginMaxAttempts: adminLoginMaxAttempts,
 		AdminLoginWindow:      adminLoginWindow,
 		LLMProvider:           getenv("LLM_PROVIDER", "mock"),
-		LLMAPIKey:             os.Getenv("LLM_API_KEY"),
-		LLMModel:              os.Getenv("LLM_MODEL"),
+		LLMAPIKey:             getenv("LLM_API_KEY", os.Getenv("GEMINI_API_KEY")),
+		LLMModel:              getenv("LLM_MODEL", "gemini-2.5-flash"),
 		LLMTimeout:            time.Duration(seconds) * time.Second,
 	}
 }

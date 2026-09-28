@@ -23,7 +23,7 @@ func TestNegotiationFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if salary.Rules.Proposal.Kind != "raise_percent" || salary.Rules.Proposal.MaximumValue != 10 || deadline.Rules.Proposal.Kind != "extension_days" || deadline.Rules.MaxTurns != 10 {
+	if salary.Rules.Proposal.Kind != "raise_percent" || salary.Rules.Proposal.PreferredValue != 6 || salary.Rules.Proposal.MaximumValue != 10 || salary.Rules.Proposal.InputMaximumValue != 30 || deadline.Rules.Proposal.Kind != "extension_days" || deadline.Rules.MaxTurns != 10 || deadline.Rules.MinimumArgumentScoreForAgreement != 3 || deadline.Rules.MaximumPressureForAgreement != 2 || deadline.Rules.Behavior.Mode != OpponentModeDifficult || len(deadline.Rules.Behavior.PriorityShifts) != 2 {
 		t.Fatalf("unexpected scenario rules: salary=%+v deadline=%+v", salary.Rules, deadline.Rules)
 	}
 	customScenario := validScenarioFixture()
@@ -167,7 +167,34 @@ func TestProcessMoveRejectsAcceptWithoutOffer(t *testing.T) {
 	}
 }
 
-func TestProcessMessageHonorsTurnLimit(t *testing.T) {
+func TestProcessMoveRejectsAcceptanceOfRejectedOffer(t *testing.T) {
+	service := NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{Content: "Что для вас важно?", Intent: IntentAskInterest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{Content: "Результаты выросли на 20%.", Intent: IntentPresentEvidence}); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.ProcessMove(context.Background(), session.ID, numericMove(20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Session.State.LastOfferQuality != domain.OfferQualityRejected {
+		t.Fatalf("offer was not rejected: %+v", turn.Session.State)
+	}
+	if _, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{Content: "Принимаю.", Intent: IntentAccept}); !errors.Is(err, ErrInvalidMove) {
+		t.Fatalf("expected rejected offer acceptance error, got %v", err)
+	}
+}
+
+func TestProcessMessageAutomaticallyFinishesAtTurnLimit(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	service := NewService(repo, llm.NewMockProvider())
 	rules := domain.DefaultScenarioRules()
@@ -183,11 +210,121 @@ func TestProcessMessageHonorsTurnLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessMessage(context.Background(), session.ID, "Первый ход"); err != nil {
+	turn, err := service.ProcessMessage(context.Background(), session.ID, "Первый ход")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessMessage(context.Background(), session.ID, "Второй ход"); !errors.Is(err, ErrTurnLimitReached) {
-		t.Fatalf("expected ErrTurnLimitReached, got %v", err)
+	if turn.Result == nil || turn.Session.Status != domain.SessionStatusFinished || turn.Session.State.Phase != domain.PhaseFinished {
+		t.Fatalf("last turn did not finish the session: %+v", turn)
+	}
+	stored, err := service.Result(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.SessionID != session.ID || stored.OutcomeCode == "" {
+		t.Fatalf("automatic result was not stored: %+v", stored)
+	}
+	repeated, err := service.Finish(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repeated.OutcomeCode != stored.OutcomeCode || repeated.FinalScore != stored.FinalScore {
+		t.Fatalf("idempotent finish returned a different result: first=%+v repeated=%+v", stored, repeated)
+	}
+	if _, err := service.ProcessMessage(context.Background(), session.ID, "Второй ход"); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected finished-session conflict, got %v", err)
+	}
+}
+
+func TestAbandonPersistsIdempotentResult(t *testing.T) {
+	service := NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{Content: "Что для вас важно?", Intent: IntentAskInterest}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.Abandon(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OutcomeCode != "abandoned" || result.Outcome != "Переговоры прерваны игроком" || result.Analysis.AnalyzedTurns != 1 {
+		t.Fatalf("unexpected abandoned result: %+v", result)
+	}
+	loaded, err := service.Session(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != domain.SessionStatusAbandoned || loaded.State.Phase != domain.PhaseFinished {
+		t.Fatalf("session was not abandoned: %+v", loaded)
+	}
+	repeated, err := service.Abandon(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repeated.OutcomeCode != result.OutcomeCode || repeated.FinalScore != result.FinalScore {
+		t.Fatalf("idempotent abandon returned a different result: first=%+v repeated=%+v", result, repeated)
+	}
+}
+
+func TestForkSessionRestoresCheckpointAndKeepsParentUnchanged(t *testing.T) {
+	service := NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := service.StartSession(context.Background(), "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moves := []PlayerMove{
+		{Content: "Что для вас важно?", Intent: IntentAskInterest},
+		{Content: "Результат вырос на 20%.", Intent: IntentPresentEvidence},
+		{Content: "Других вариантов у вас нет.", Intent: IntentPressure},
+	}
+	for _, move := range moves {
+		if _, err := service.ProcessMove(context.Background(), parent.ID, move); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	child, err := service.ForkSession(context.Background(), parent.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ParentSessionID != parent.ID || child.ForkedFromTurn == nil || *child.ForkedFromTurn != 2 || child.Turn != 2 || child.Status != domain.SessionStatusActive {
+		t.Fatalf("unexpected fork metadata: %+v", child)
+	}
+	if child.TrustScore != 53 || child.ArgumentScore != 2 || child.PressureScore != 0 || !child.State.InterestsExplored || !child.State.EvidencePresented {
+		t.Fatalf("checkpoint state was not restored: %+v", child)
+	}
+	childMessages, err := service.Messages(context.Background(), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childCheckpoints, err := service.Checkpoints(context.Background(), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(childMessages) != 5 || len(childCheckpoints) != 3 {
+		t.Fatalf("unexpected forked history: messages=%d checkpoints=%d", len(childMessages), len(childCheckpoints))
+	}
+	if _, err := service.ProcessMove(context.Background(), child.ID, alternativeMove("review_in_3_months")); err != nil {
+		t.Fatal(err)
+	}
+	parentAfterFork, err := service.Session(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentAfterFork.Turn != 3 || parentAfterFork.State.OfferMade {
+		t.Fatalf("parent was changed by child branch: %+v", parentAfterFork)
+	}
+	if _, err := service.ForkSession(context.Background(), parent.ID, 99); !errors.Is(err, ErrInvalidFork) {
+		t.Fatalf("expected invalid fork point, got %v", err)
 	}
 }
 
@@ -210,6 +347,61 @@ func TestProcessMoveDoesNotCallLegacyProvider(t *testing.T) {
 	}
 	if turn.Reply == "" {
 		t.Fatal("expected deterministic opponent reply")
+	}
+}
+
+func TestProcessMoveUsesReplyGeneratorWithoutChangingEvaluation(t *testing.T) {
+	generator := &recordingReplyGenerator{reply: "Сформулированный LLM ответ"}
+	service := NewService(
+		repository.NewMemoryRepository(), llm.NewMockProvider(),
+		WithReplyGenerator(generator),
+	)
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{
+		Content: "Какие ограничения бюджета для вас важны?",
+		Intent:  IntentAskInterest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Reply != generator.reply {
+		t.Fatalf("reply = %q", turn.Reply)
+	}
+	if turn.Analysis.TrustDelta == 0 || turn.Session.TrustScore != session.TrustScore+turn.Analysis.TrustDelta {
+		t.Fatalf("LLM changed or bypassed deterministic evaluation: %+v", turn)
+	}
+	if generator.request.BaseReply == "" || generator.request.OpponentRole == "" || len(generator.request.History) != 1 {
+		t.Fatalf("incomplete reply context: %+v", generator.request)
+	}
+}
+
+func TestProcessMoveFallsBackWhenReplyGeneratorFails(t *testing.T) {
+	service := NewService(
+		repository.NewMemoryRepository(), llm.NewMockProvider(),
+		WithReplyGenerator(failingReplyGenerator{}),
+	)
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "salary-negotiation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{
+		Content: "Какие ограничения бюджета для вас важны?",
+		Intent:  IntentAskInterest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Reply == "" {
+		t.Fatal("expected deterministic fallback reply")
 	}
 }
 
@@ -253,4 +445,20 @@ type failingProvider struct{}
 
 func (failingProvider) Analyze(context.Context, llm.AnalysisRequest) (llm.AnalysisResult, error) {
 	return llm.AnalysisResult{}, errors.New("legacy provider must not be called")
+}
+
+type recordingReplyGenerator struct {
+	reply   string
+	request llm.ReplyRequest
+}
+
+func (generator *recordingReplyGenerator) GenerateReply(_ context.Context, request llm.ReplyRequest) (string, error) {
+	generator.request = request
+	return generator.reply, nil
+}
+
+type failingReplyGenerator struct{}
+
+func (failingReplyGenerator) GenerateReply(context.Context, llm.ReplyRequest) (string, error) {
+	return "", errors.New("LLM unavailable")
 }

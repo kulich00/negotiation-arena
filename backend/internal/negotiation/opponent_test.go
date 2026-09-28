@@ -8,6 +8,7 @@ import (
 
 func TestGenerateOpponentReplyForProposal(t *testing.T) {
 	rules := domain.DefaultScenarioRules()
+	rules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", PreferredValue: 3, MaximumValue: 10, InputMaximumValue: 20}
 	move := PlayerMove{Intent: IntentPropose, Proposal: &MoveProposal{Kind: "raise_percent", Value: 5}}
 
 	tests := []struct {
@@ -45,7 +46,7 @@ func TestGenerateOpponentReplyForProposal(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			session := domain.Session{TrustScore: test.trust, State: test.state}
-			evaluation := EvaluateMove(move, session.State)
+			evaluation := EvaluateMove(move, session.State, rules)
 			if got := GenerateOpponentReply(move, session, rules, evaluation); got != test.want {
 				t.Fatalf("unexpected reply:\n got: %q\nwant: %q", got, test.want)
 			}
@@ -69,7 +70,7 @@ func TestGenerateOpponentReplyByIntent(t *testing.T) {
 	for _, test := range tests {
 		t.Run(string(test.intent), func(t *testing.T) {
 			move := PlayerMove{Intent: test.intent}
-			evaluation := EvaluateMove(move, session.State)
+			evaluation := EvaluateMove(move, session.State, rules)
 			if got := GenerateOpponentReply(move, session, rules, evaluation); got != test.want {
 				t.Fatalf("unexpected reply: %q", got)
 			}
@@ -120,11 +121,27 @@ func TestGenerateOpponentReplyForSPINAndBATNA(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			session := domain.Session{TrustScore: 50, State: test.state}
-			evaluation := EvaluateMove(test.move, session.State)
+			evaluation := EvaluateMove(test.move, session.State, rules)
 			if got := GenerateOpponentReply(test.move, session, rules, evaluation); got != test.want {
 				t.Fatalf("unexpected reply:\n got: %q\nwant: %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestGenerateOpponentReplyRejectsOfferBeyondConcessionLimit(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	rules.RequiresInterestExploration = false
+	rules.RequiresEvidence = false
+	rules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", PreferredValue: 5, MaximumValue: 10, InputMaximumValue: 30}
+	move := PlayerMove{Intent: IntentPropose, Proposal: &MoveProposal{Kind: "raise_percent", Value: 20}}
+	session := domain.Session{TrustScore: 70, State: domain.InitialSessionState()}
+	evaluation := EvaluateMove(move, session.State, rules)
+
+	got := GenerateOpponentReply(move, session, rules, evaluation)
+	want := "Это выходит за мой предел уступки. Готов обсуждать значение не более 10."
+	if got != want {
+		t.Fatalf("unexpected reply: %q", got)
 	}
 }
 

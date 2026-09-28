@@ -37,6 +37,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 		name           string
 		change         func(*domain.Session)
 		recommendation string
+		outcomeCode    string
 	}{
 		{
 			name: "interests not explored",
@@ -44,6 +45,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 				session.State.InterestsExplored = false
 			},
 			recommendation: "Перед предложением выясните интересы второй стороны",
+			outcomeCode:    "fragile_agreement",
 		},
 		{
 			name: "evidence not presented",
@@ -51,6 +53,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 				session.State.EvidencePresented = false
 			},
 			recommendation: "Подкрепите позицию измеримыми фактами",
+			outcomeCode:    "fragile_agreement",
 		},
 		{
 			name: "offer not made",
@@ -59,6 +62,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 				session.State.OfferAccepted = false
 			},
 			recommendation: "Сформулируйте конкретное предложение",
+			outcomeCode:    "no_agreement",
 		},
 		{
 			name: "offer not accepted",
@@ -66,6 +70,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 				session.State.OfferAccepted = false
 			},
 			recommendation: "Убедитесь, что итоговое предложение явно принято",
+			outcomeCode:    "no_agreement",
 		},
 		{
 			name: "trust below threshold",
@@ -73,6 +78,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 				session.TrustScore = rules.MinimumTrustForAgreement - 1
 			},
 			recommendation: "Сначала укрепите доверие второй стороны",
+			outcomeCode:    "fragile_agreement",
 		},
 	}
 
@@ -81,7 +87,7 @@ func TestEvaluateResultStructuredRequirements(t *testing.T) {
 			session := successfulStructuredSession()
 			test.change(&session)
 			result := EvaluateResult(session, rules)
-			if result.Outcome != "Соглашение не достигнуто" {
+			if result.OutcomeCode != test.outcomeCode {
 				t.Fatalf("unexpected outcome: %+v", result)
 			}
 			if !slices.Contains(result.Recommendations, test.recommendation) {
@@ -163,6 +169,32 @@ func TestEvaluateResultRecommendsNextSPINStepAndBATNA(t *testing.T) {
 	}
 	if !slices.Contains(result.Recommendations, "Заранее определите BATNA и границу приемлемого соглашения") {
 		t.Fatalf("BATNA recommendation is missing: %+v", result.Recommendations)
+	}
+}
+
+func TestEvaluateResultDistinguishesOpponentOutcomes(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+
+	mutualGain := successfulStructuredSession()
+	mutualGain.ArgumentScore = 4
+	mutualGain.State.LastOfferQuality = domain.OfferQualityPreferred
+	result := EvaluateResult(mutualGain, rules)
+	if result.OutcomeCode != "mutual_gain" || result.Outcome != "Взаимовыгодное соглашение" {
+		t.Fatalf("unexpected mutual-gain result: %+v", result)
+	}
+
+	rejected := successfulStructuredSession()
+	rejected.State.LastOfferQuality = domain.OfferQualityRejected
+	result = EvaluateResult(rejected, rules)
+	if result.OutcomeCode != "walk_away" || result.Outcome != "Оппонент отказался от соглашения" {
+		t.Fatalf("unexpected rejected-offer result: %+v", result)
+	}
+
+	pressured := successfulStructuredSession()
+	pressured.PressureScore = rules.MaximumPressureForAgreement + 1
+	result = EvaluateResult(pressured, rules)
+	if result.OutcomeCode != "walk_away" {
+		t.Fatalf("unexpected excessive-pressure result: %+v", result)
 	}
 }
 

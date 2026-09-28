@@ -12,16 +12,31 @@
   "rules": {
     "maxTurns": 10,
     "minimumTrustForAgreement": 60,
+    "minimumArgumentScoreForAgreement": 3,
+    "maximumPressureForAgreement": 2,
     "requiresInterestExploration": true,
     "requiresEvidence": true,
     "proposal": {
       "kind": "extension_days",
+      "preferredValue": 7,
       "maximumValue": 14,
-      "alternativeIds": ["phased_delivery"]
+      "inputMaximumValue": 60,
+      "alternativeIds": ["phased_delivery"],
+      "preferredAlternativeIds": ["phased_delivery"]
     },
     "trustScoreWeight": 1,
     "argumentScoreWeight": 1,
-    "pressureScoreWeight": 1
+    "pressureScoreWeight": 1,
+    "behavior": {
+      "mode": "difficult",
+      "emotionality": 2,
+      "volatility": 2,
+      "initialPriority": "соблюдение исходного срока",
+      "priorityShifts": [
+        {"turn": 3, "priority": "снижение рисков запуска"},
+        {"turn": 6, "priority": "поэтапная поставка результата"}
+      ]
+    }
   }
 }
 

@@ -32,3 +32,18 @@ func TestLoadAdminSecuritySettingsUsesSafeDefaults(t *testing.T) {
 		t.Fatalf("unexpected defaults: %+v", config)
 	}
 }
+
+func TestLoadLLMSettingsAndDefaults(t *testing.T) {
+	t.Setenv("LLM_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+	t.Setenv("LLM_MODEL", "")
+	t.Setenv("LLM_TIMEOUT_SECONDS", "0")
+
+	config := Load()
+	if config.LLMAPIKey != "gemini-key" {
+		t.Fatalf("LLMAPIKey was not loaded from GEMINI_API_KEY")
+	}
+	if config.LLMModel != "gemini-2.5-flash" || config.LLMTimeout != 15*time.Second {
+		t.Fatalf("unexpected LLM defaults: model=%q timeout=%s", config.LLMModel, config.LLMTimeout)
+	}
+}

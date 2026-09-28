@@ -37,10 +37,11 @@ type MoveProposal struct {
 }
 
 type MoveEvaluation struct {
-	TrustDelta    int
-	ArgumentDelta int
-	PressureDelta int
-	State         domain.SessionState
+	TrustDelta       int
+	ArgumentDelta    int
+	PressureDelta    int
+	State            domain.SessionState
+	OpponentReaction *domain.OpponentReaction
 }
 
 var ErrInvalidMove = errors.New("invalid move")
@@ -53,6 +54,7 @@ func fmtInvalidMove(reason string) error {
 }
 
 func ValidateMove(move PlayerMove, rules domain.ScenarioRules) error {
+	rules = rules.WithDefaults()
 	if err := validateMoveContent(move.Content); err != nil {
 		return err
 	}
@@ -97,8 +99,8 @@ func ValidateMove(move PlayerMove, rules domain.ScenarioRules) error {
 	if proposal.Kind != rules.Proposal.Kind {
 		return fmt.Errorf("%w: proposal kind must be %q", ErrInvalidMove, rules.Proposal.Kind)
 	}
-	if proposal.Value < 1 || proposal.Value > rules.Proposal.MaximumValue {
-		return fmt.Errorf("%w: proposal value must be between 1 and %d", ErrInvalidMove, rules.Proposal.MaximumValue)
+	if proposal.Value < 1 || proposal.Value > rules.Proposal.InputMaximumValue {
+		return fmt.Errorf("%w: proposal value must be between 1 and %d", ErrInvalidMove, rules.Proposal.InputMaximumValue)
 	}
 	return nil
 }
@@ -115,7 +117,8 @@ func validateMoveContent(content string) error {
 
 // EvaluateMove applies deterministic score and state changes. Opponent replies
 // for structured moves are selected separately by GenerateOpponentReply.
-func EvaluateMove(move PlayerMove, state domain.SessionState) MoveEvaluation {
+func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.ScenarioRules) MoveEvaluation {
+	rules = rules.WithDefaults()
 	evaluation := MoveEvaluation{State: state}
 	evaluation.State.StructuredMovesUsed = true
 
@@ -175,6 +178,7 @@ func EvaluateMove(move PlayerMove, state domain.SessionState) MoveEvaluation {
 		evaluation.TrustDelta = 1
 		evaluation.State.OfferMade = true
 		evaluation.State.Phase = domain.PhaseBargaining
+		evaluation.State.LastOfferQuality = proposalQuality(move.Proposal, rules.Proposal)
 		if move.Proposal == nil {
 			evaluation.State.LastOfferID = "free_form"
 		} else if move.Proposal.AlternativeID != "" {
@@ -192,6 +196,27 @@ func EvaluateMove(move PlayerMove, state domain.SessionState) MoveEvaluation {
 	}
 
 	return evaluation
+}
+
+func proposalQuality(proposal *MoveProposal, constraint domain.ProposalConstraint) domain.OfferQuality {
+	if proposal == nil {
+		return domain.OfferQualityAcceptable
+	}
+	if proposal.AlternativeID != "" {
+		for _, preferred := range constraint.PreferredAlternativeIDs {
+			if proposal.AlternativeID == preferred {
+				return domain.OfferQualityPreferred
+			}
+		}
+		return domain.OfferQualityAcceptable
+	}
+	if proposal.Value <= constraint.PreferredValue {
+		return domain.OfferQualityPreferred
+	}
+	if proposal.Value <= constraint.MaximumValue {
+		return domain.OfferQualityAcceptable
+	}
+	return domain.OfferQualityRejected
 }
 
 func advanceToExploration(state *domain.SessionState) {

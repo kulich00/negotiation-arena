@@ -7,6 +7,7 @@ import (
 )
 
 func EvaluateResult(session domain.Session, rules domain.ScenarioRules) domain.Result {
+	rules = rules.WithDefaults()
 	rawScore :=
 		float64(session.TrustScore)*rules.TrustScoreWeight +
 			float64(session.ArgumentScore*5)*rules.ArgumentScoreWeight -
@@ -16,6 +17,7 @@ func EvaluateResult(session domain.Session, rules domain.ScenarioRules) domain.R
 	result := domain.Result{
 		SessionID:       session.ID,
 		FinalScore:      score,
+		OutcomeCode:     "needs_improvement",
 		Outcome:         "Переговоры требуют доработки",
 		Strengths:       []string{},
 		Mistakes:        []string{},
@@ -35,9 +37,15 @@ func EvaluateResult(session domain.Session, rules domain.ScenarioRules) domain.R
 }
 
 func evaluateStructuredResult(result *domain.Result, session domain.Session, rules domain.ScenarioRules) {
+	rules = rules.WithDefaults()
+	offerRejected := session.State.LastOfferQuality == domain.OfferQualityRejected
+	pressureExceeded := session.PressureScore > rules.MaximumPressureForAgreement
 	agreement := session.State.OfferMade &&
 		session.State.OfferAccepted &&
 		session.TrustScore >= rules.MinimumTrustForAgreement &&
+		session.ArgumentScore >= rules.MinimumArgumentScoreForAgreement &&
+		!pressureExceeded &&
+		!offerRejected &&
 		result.FinalScore >= 50
 
 	if session.State.InterestsExplored {
@@ -55,6 +63,19 @@ func evaluateStructuredResult(result *domain.Result, session domain.Session, rul
 	}
 
 	evaluateSPINAndBATNA(result, session.State)
+	if session.ArgumentScore < rules.MinimumArgumentScoreForAgreement {
+		result.Recommendations = append(result.Recommendations, "Усильте позицию фактами до минимального уровня аргументации")
+	}
+	if pressureExceeded {
+		result.Mistakes = append(result.Mistakes, "Превышена допустимая для оппонента степень давления")
+		result.Recommendations = append(result.Recommendations, "Снизьте давление и вернитесь к интересам и объективным критериям")
+	}
+	if offerRejected {
+		result.Mistakes = append(result.Mistakes, "Предложение вышло за предел уступки оппонента")
+		result.Recommendations = append(result.Recommendations, "Скорректируйте условия до приемлемого диапазона или используйте альтернативу")
+	} else if session.State.LastOfferQuality == domain.OfferQualityPreferred {
+		result.Strengths = append(result.Strengths, "Предложение учитывает предпочтительный диапазон оппонента")
+	}
 
 	if !session.State.OfferMade {
 		result.Recommendations = append(result.Recommendations, "Сформулируйте конкретное предложение")
@@ -69,11 +90,23 @@ func evaluateStructuredResult(result *domain.Result, session domain.Session, rul
 	}
 
 	switch {
+	case agreement && result.FinalScore >= 80 && session.State.LastOfferQuality == domain.OfferQualityPreferred && session.PressureScore == 0:
+		result.OutcomeCode = "mutual_gain"
+		result.Outcome = "Взаимовыгодное соглашение"
 	case agreement && result.FinalScore >= 70:
+		result.OutcomeCode = "advantageous_agreement"
 		result.Outcome = "Выгодное соглашение"
 	case agreement:
+		result.OutcomeCode = "compromise"
 		result.Outcome = "Компромисс"
+	case session.State.OfferMade && session.State.OfferAccepted && !offerRejected && !pressureExceeded:
+		result.OutcomeCode = "fragile_agreement"
+		result.Outcome = "Формальное соглашение с высоким риском"
+	case offerRejected || pressureExceeded:
+		result.OutcomeCode = "walk_away"
+		result.Outcome = "Оппонент отказался от соглашения"
 	default:
+		result.OutcomeCode = "no_agreement"
 		result.Outcome = "Соглашение не достигнуто"
 	}
 }
@@ -114,8 +147,10 @@ func evaluateLegacyResult(result *domain.Result, session domain.Session) {
 	}
 
 	if result.FinalScore >= 70 {
+		result.OutcomeCode = "advantageous_agreement"
 		result.Outcome = "Выгодное соглашение"
 	} else if result.FinalScore >= 50 {
+		result.OutcomeCode = "compromise"
 		result.Outcome = "Компромисс"
 	}
 }

@@ -28,10 +28,12 @@ var techniqueLabels = map[string]string{
 func AggregateSessionAnalysis(messages []domain.Message) domain.SessionAnalysis {
 	result := domain.SessionAnalysis{
 		Techniques:              []domain.TechniqueUsage{},
+		ErrorClasses:            []domain.ErrorClass{},
 		RepeatedRisks:           []domain.RepeatedRisk{},
 		PriorityRecommendations: []string{},
 	}
 	techniqueCounts := make(map[string]int)
+	errorClasses := make(map[string]domain.ErrorClass)
 	riskCounts := make(map[string]int)
 	recommendationCounts := make(map[string]int)
 
@@ -45,6 +47,26 @@ func AggregateSessionAnalysis(messages []domain.Message) domain.SessionAnalysis 
 
 		if analysis.Technique != "" {
 			techniqueCounts[analysis.Technique]++
+		}
+		for _, item := range analysis.Errors {
+			code := strings.TrimSpace(item.Code)
+			if code == "" {
+				continue
+			}
+			class := errorClasses[code]
+			if class.Code == "" {
+				class = domain.ErrorClass{
+					Code: code, Label: item.Label, Severity: item.Severity, Turns: []int{},
+				}
+			}
+			class.Count++
+			if errorSeverityRank(item.Severity) > errorSeverityRank(class.Severity) {
+				class.Severity = item.Severity
+			}
+			if len(class.Turns) == 0 || class.Turns[len(class.Turns)-1] != turn {
+				class.Turns = append(class.Turns, turn)
+			}
+			errorClasses[code] = class
 		}
 		for _, risk := range analysis.Risks {
 			if risk = strings.TrimSpace(risk); risk != "" {
@@ -79,6 +101,21 @@ func AggregateSessionAnalysis(messages []domain.Message) domain.SessionAnalysis 
 			return result.Techniques[i].Count > result.Techniques[j].Count
 		}
 		return result.Techniques[i].Technique < result.Techniques[j].Technique
+	})
+
+	for _, class := range errorClasses {
+		result.ErrorClasses = append(result.ErrorClasses, class)
+	}
+	sort.Slice(result.ErrorClasses, func(i, j int) bool {
+		leftRank := errorSeverityRank(result.ErrorClasses[i].Severity)
+		rightRank := errorSeverityRank(result.ErrorClasses[j].Severity)
+		if leftRank != rightRank {
+			return leftRank > rightRank
+		}
+		if result.ErrorClasses[i].Count != result.ErrorClasses[j].Count {
+			return result.ErrorClasses[i].Count > result.ErrorClasses[j].Count
+		}
+		return result.ErrorClasses[i].Code < result.ErrorClasses[j].Code
 	})
 
 	for risk, count := range riskCounts {

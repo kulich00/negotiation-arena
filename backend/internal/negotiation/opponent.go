@@ -1,11 +1,20 @@
 package negotiation
 
-import "github.com/kulich00/negotiation-arena/backend/internal/domain"
+import (
+	"fmt"
+
+	"github.com/kulich00/negotiation-arena/backend/internal/domain"
+)
 
 // GenerateOpponentReply returns a deterministic response for a validated
 // structured move. A future LLM provider may rephrase this response, while the
 // decision itself remains controlled by the negotiation rules.
 func GenerateOpponentReply(move PlayerMove, session domain.Session, rules domain.ScenarioRules, evaluation MoveEvaluation) string {
+	reply := standardOpponentReply(move, session, rules, evaluation)
+	return difficultOpponentReply(reply, evaluation.OpponentReaction)
+}
+
+func standardOpponentReply(move PlayerMove, session domain.Session, rules domain.ScenarioRules, evaluation MoveEvaluation) string {
 	switch move.Intent {
 	case IntentAskInterest:
 		return "Для меня важно снизить риски и понять взаимную выгоду. Какие варианты вы предлагаете?"
@@ -47,6 +56,28 @@ func GenerateOpponentReply(move PlayerMove, session domain.Session, rules domain
 	}
 }
 
+func difficultOpponentReply(reply string, reaction *domain.OpponentReaction) string {
+	if reaction == nil {
+		return reply
+	}
+	switch {
+	case reaction.Mood == OpponentMoodIrritated && reaction.Priority != "":
+		return fmt.Sprintf("Меня раздражает такой тон. Мой текущий приоритет — «%s». %s", reaction.Priority, reply)
+	case reaction.Mood == OpponentMoodIrritated:
+		return "Меня раздражает такой тон. " + reply
+	case reaction.PriorityChanged:
+		return fmt.Sprintf("Ситуация изменилась: теперь для меня важнее «%s». %s", reaction.Priority, reply)
+	case reaction.Mood == OpponentMoodGuarded && reaction.Priority != "":
+		return fmt.Sprintf("Я пока настроен скептически. Мой текущий приоритет — «%s». %s", reaction.Priority, reply)
+	case reaction.Mood == OpponentMoodGuarded:
+		return "Я пока настроен скептически. " + reply
+	case reaction.Mood == OpponentMoodReceptive:
+		return "Такой подход помогает снизить напряжение. " + reply
+	default:
+		return reply
+	}
+}
+
 func proposalReply(session domain.Session, rules domain.ScenarioRules, evaluation MoveEvaluation) string {
 	if rules.RequiresInterestExploration && !evaluation.State.InterestsExplored {
 		return "Прежде чем обсуждать конкретные условия, выясните, что важно второй стороне."
@@ -54,9 +85,22 @@ func proposalReply(session domain.Session, rules domain.ScenarioRules, evaluatio
 	if rules.RequiresEvidence && !evaluation.State.EvidencePresented {
 		return "Для решения по предложению нужны факты и измеримые аргументы."
 	}
+	if evaluation.State.LastOfferQuality == domain.OfferQualityRejected {
+		return rejectedProposalReply(rules.Proposal)
+	}
 	projectedTrust := clamp(session.TrustScore + evaluation.TrustDelta)
 	if projectedTrust < rules.MinimumTrustForAgreement {
 		return "Пока я не готов принять эти условия. Сначала нужно укрепить доверие и снизить риски."
 	}
+	if evaluation.State.LastOfferQuality == domain.OfferQualityPreferred {
+		return "Предложение учитывает мои приоритеты. Готов зафиксировать эти условия."
+	}
 	return "Условия выглядят приемлемо. Если вы их подтверждаете, можем зафиксировать договорённость."
+}
+
+func rejectedProposalReply(constraint domain.ProposalConstraint) string {
+	if constraint.Kind != "none" {
+		return fmt.Sprintf("Это выходит за мой предел уступки. Готов обсуждать значение не более %d.", constraint.MaximumValue)
+	}
+	return "Этот вариант для меня неприемлем. Нужна другая конфигурация условий."
 }

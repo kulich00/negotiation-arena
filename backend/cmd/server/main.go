@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,7 +43,12 @@ func main() {
 		}
 		repo = repository.NewPostgresRepository(db)
 	}
-	service := negotiation.NewService(repo, llm.NewMockProvider())
+	replyGenerator, err := configureReplyGenerator(cfg, logger)
+	if err != nil {
+		logger.Error("LLM configuration failed", "error", err)
+		os.Exit(1)
+	}
+	service := negotiation.NewService(repo, llm.NewMockProvider(), negotiation.WithReplyGenerator(replyGenerator))
 	if err := service.SeedDefaults(ctx); err != nil {
 		logger.Error("scenario initialization failed", "error", err)
 		os.Exit(1)
@@ -82,5 +89,25 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
+	}
+}
+
+func configureReplyGenerator(cfg config.Config, logger *slog.Logger) (llm.ReplyGenerator, error) {
+	passthrough := llm.NewPassthroughReplyGenerator()
+	switch strings.ToLower(strings.TrimSpace(cfg.LLMProvider)) {
+	case "", "mock":
+		return passthrough, nil
+	case "gemini":
+		generator, err := llm.NewGeminiGenerator(llm.GeminiConfig{
+			APIKey: cfg.LLMAPIKey,
+			Model:  cfg.LLMModel,
+			Client: &http.Client{Timeout: cfg.LLMTimeout},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return llm.NewFallbackReplyGenerator(generator, passthrough, logger), nil
+	default:
+		return nil, fmt.Errorf("unsupported LLM_PROVIDER %q (use mock or gemini)", cfg.LLMProvider)
 	}
 }

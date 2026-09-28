@@ -24,13 +24,39 @@ func TestValidateScenario(t *testing.T) {
 		{name: "negative turns", change: func(s *domain.Scenario) { s.Rules.MaxTurns = -1 }},
 		{name: "too many turns", change: func(s *domain.Scenario) { s.Rules.MaxTurns = 51 }},
 		{name: "trust above range", change: func(s *domain.Scenario) { s.Rules.MinimumTrustForAgreement = 101 }},
+		{name: "argument above range", change: func(s *domain.Scenario) { s.Rules.MinimumArgumentScoreForAgreement = 101 }},
+		{name: "pressure above range", change: func(s *domain.Scenario) { s.Rules.MaximumPressureForAgreement = 101 }},
 		{name: "negative weight", change: func(s *domain.Scenario) { s.Rules.TrustScoreWeight = -1 }},
 		{name: "not finite weight", change: func(s *domain.Scenario) { s.Rules.ArgumentScoreWeight = math.NaN() }},
 		{name: "invalid proposal kind", change: func(s *domain.Scenario) { s.Rules.Proposal.Kind = "Raise Percent" }},
 		{name: "none with maximum", change: func(s *domain.Scenario) { s.Rules.Proposal.MaximumValue = 1 }},
 		{name: "numeric without maximum", change: func(s *domain.Scenario) { s.Rules.Proposal.Kind = "raise_percent" }},
+		{name: "preferred above maximum", change: func(s *domain.Scenario) {
+			s.Rules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", PreferredValue: 11, MaximumValue: 10, InputMaximumValue: 20}
+		}},
+		{name: "maximum above input maximum", change: func(s *domain.Scenario) {
+			s.Rules.Proposal = domain.ProposalConstraint{Kind: "raise_percent", PreferredValue: 5, MaximumValue: 10, InputMaximumValue: 9}
+		}},
 		{name: "duplicate alternative", change: func(s *domain.Scenario) { s.Rules.Proposal.AlternativeIDs = []string{"review_later", "review_later"} }},
 		{name: "invalid alternative", change: func(s *domain.Scenario) { s.Rules.Proposal.AlternativeIDs = []string{"review later"} }},
+		{name: "unknown preferred alternative", change: func(s *domain.Scenario) { s.Rules.Proposal.PreferredAlternativeIDs = []string{"review_later"} }},
+		{name: "unknown behavior mode", change: func(s *domain.Scenario) { s.Rules.Behavior.Mode = "random" }},
+		{name: "standard with difficult settings", change: func(s *domain.Scenario) { s.Rules.Behavior.Emotionality = 1 }},
+		{name: "difficult without emotionality", change: func(s *domain.Scenario) {
+			s.Rules.Behavior = domain.OpponentBehavior{Mode: OpponentModeDifficult, Volatility: 2, InitialPriority: "срок"}
+		}},
+		{name: "difficult without volatility", change: func(s *domain.Scenario) {
+			s.Rules.Behavior = domain.OpponentBehavior{Mode: OpponentModeDifficult, Emotionality: 2, InitialPriority: "срок"}
+		}},
+		{name: "difficult without initial priority", change: func(s *domain.Scenario) {
+			s.Rules.Behavior = domain.OpponentBehavior{Mode: OpponentModeDifficult, Emotionality: 2, Volatility: 2}
+		}},
+		{name: "unordered priority shifts", change: func(s *domain.Scenario) {
+			s.Rules.Behavior = domain.OpponentBehavior{Mode: OpponentModeDifficult, Emotionality: 2, Volatility: 2, InitialPriority: "срок", PriorityShifts: []domain.OpponentPriorityShift{{Turn: 3, Priority: "риски"}, {Turn: 2, Priority: "цена"}}}
+		}},
+		{name: "priority shift after turn limit", change: func(s *domain.Scenario) {
+			s.Rules.Behavior = domain.OpponentBehavior{Mode: OpponentModeDifficult, Emotionality: 2, Volatility: 2, InitialPriority: "срок", PriorityShifts: []domain.OpponentPriorityShift{{Turn: s.Rules.MaxTurns + 1, Priority: "риски"}}}
+		}},
 	}
 
 	for _, test := range tests {

@@ -55,6 +55,12 @@ func ValidateScenario(scenario domain.Scenario) error {
 	if rules.MinimumTrustForAgreement < 1 || rules.MinimumTrustForAgreement > 100 {
 		return invalidScenario("minimumTrustForAgreement must be between 1 and 100")
 	}
+	if rules.MinimumArgumentScoreForAgreement < 1 || rules.MinimumArgumentScoreForAgreement > 100 {
+		return invalidScenario("minimumArgumentScoreForAgreement must be between 1 and 100")
+	}
+	if rules.MaximumPressureForAgreement < 1 || rules.MaximumPressureForAgreement > 100 {
+		return invalidScenario("maximumPressureForAgreement must be between 1 and 100")
+	}
 	if err := validateWeight("trustScoreWeight", rules.TrustScoreWeight); err != nil {
 		return err
 	}
@@ -64,7 +70,10 @@ func ValidateScenario(scenario domain.Scenario) error {
 	if err := validateWeight("pressureScoreWeight", rules.PressureScoreWeight); err != nil {
 		return err
 	}
-	return validateProposalConstraint(rules.Proposal)
+	if err := validateProposalConstraint(rules.Proposal); err != nil {
+		return err
+	}
+	return validateOpponentBehavior(rules.Behavior, rules.MaxTurns)
 }
 
 func normalizeScenario(scenario domain.Scenario) domain.Scenario {
@@ -84,7 +93,56 @@ func normalizeScenario(scenario domain.Scenario) domain.Scenario {
 		alternatives[index] = strings.TrimSpace(alternativeID)
 	}
 	scenario.Rules.Proposal.AlternativeIDs = alternatives
+	preferredAlternatives := make([]string, len(scenario.Rules.Proposal.PreferredAlternativeIDs))
+	for index, alternativeID := range scenario.Rules.Proposal.PreferredAlternativeIDs {
+		preferredAlternatives[index] = strings.TrimSpace(alternativeID)
+	}
+	scenario.Rules.Proposal.PreferredAlternativeIDs = preferredAlternatives
+	scenario.Rules.Behavior.Mode = strings.ToLower(strings.TrimSpace(scenario.Rules.Behavior.Mode))
+	scenario.Rules.Behavior.InitialPriority = strings.TrimSpace(scenario.Rules.Behavior.InitialPriority)
+	priorityShifts := make([]domain.OpponentPriorityShift, len(scenario.Rules.Behavior.PriorityShifts))
+	for index, shift := range scenario.Rules.Behavior.PriorityShifts {
+		shift.Priority = strings.TrimSpace(shift.Priority)
+		priorityShifts[index] = shift
+	}
+	scenario.Rules.Behavior.PriorityShifts = priorityShifts
 	return scenario
+}
+
+func validateOpponentBehavior(behavior domain.OpponentBehavior, maxTurns int) error {
+	switch behavior.Mode {
+	case OpponentModeStandard:
+		if behavior.Emotionality != 0 || behavior.Volatility != 0 || behavior.InitialPriority != "" || len(behavior.PriorityShifts) != 0 {
+			return invalidScenario("standard behavior cannot define difficult-client settings")
+		}
+		return nil
+	case OpponentModeDifficult:
+	default:
+		return invalidScenario("behavior mode must be standard or difficult")
+	}
+	if behavior.Emotionality < 1 || behavior.Emotionality > 3 {
+		return invalidScenario("behavior emotionality must be between 1 and 3")
+	}
+	if behavior.Volatility < 1 || behavior.Volatility > 3 {
+		return invalidScenario("behavior volatility must be between 1 and 3")
+	}
+	if behavior.InitialPriority == "" || utf8.RuneCountInString(behavior.InitialPriority) > 200 {
+		return invalidScenario("behavior initialPriority is required and must not exceed 200 characters")
+	}
+	if len(behavior.PriorityShifts) > 10 {
+		return invalidScenario("no more than 10 behavior priority shifts are allowed")
+	}
+	previousTurn := 0
+	for _, shift := range behavior.PriorityShifts {
+		if shift.Turn <= previousTurn || shift.Turn > maxTurns {
+			return invalidScenario("behavior priority shift turns must be unique, increasing, and within maxTurns")
+		}
+		if shift.Priority == "" || utf8.RuneCountInString(shift.Priority) > 200 {
+			return invalidScenario("behavior priority shift is required and must not exceed 200 characters")
+		}
+		previousTurn = shift.Turn
+	}
+	return nil
 }
 
 func validateWeight(name string, value float64) error {
@@ -99,11 +157,19 @@ func validateProposalConstraint(proposal domain.ProposalConstraint) error {
 		return invalidScenario("proposal kind is invalid")
 	}
 	if proposal.Kind == "none" {
-		if proposal.MaximumValue != 0 {
-			return invalidScenario("maximumValue must be 0 when proposal kind is none")
+		if proposal.PreferredValue != 0 || proposal.MaximumValue != 0 || proposal.InputMaximumValue != 0 {
+			return invalidScenario("numeric proposal values must be 0 when proposal kind is none")
 		}
-	} else if proposal.MaximumValue < 1 || proposal.MaximumValue > 1_000_000 {
-		return invalidScenario("maximumValue must be between 1 and 1000000")
+	} else {
+		if proposal.PreferredValue < 1 || proposal.PreferredValue > proposal.MaximumValue {
+			return invalidScenario("preferredValue must be between 1 and maximumValue")
+		}
+		if proposal.MaximumValue < 1 || proposal.MaximumValue > proposal.InputMaximumValue {
+			return invalidScenario("maximumValue must be between 1 and inputMaximumValue")
+		}
+		if proposal.InputMaximumValue < 1 || proposal.InputMaximumValue > 1_000_000 {
+			return invalidScenario("inputMaximumValue must be between 1 and 1000000")
+		}
 	}
 	if len(proposal.AlternativeIDs) > 20 {
 		return invalidScenario("no more than 20 proposal alternatives are allowed")
@@ -117,6 +183,16 @@ func validateProposalConstraint(proposal domain.ProposalConstraint) error {
 			return invalidScenario("proposal alternative ids must be unique")
 		}
 		seen[alternativeID] = struct{}{}
+	}
+	preferredSeen := make(map[string]struct{}, len(proposal.PreferredAlternativeIDs))
+	for _, alternativeID := range proposal.PreferredAlternativeIDs {
+		if _, exists := seen[alternativeID]; !exists {
+			return invalidScenario("preferred proposal alternatives must be allowed alternatives")
+		}
+		if _, exists := preferredSeen[alternativeID]; exists {
+			return invalidScenario("preferred proposal alternative ids must be unique")
+		}
+		preferredSeen[alternativeID] = struct{}{}
 	}
 	return nil
 }

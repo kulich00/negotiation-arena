@@ -84,6 +84,30 @@ func TestAggregateSessionAnalysisUsesFirstMoveToBreakBestMoveTie(t *testing.T) {
 	}
 }
 
+func TestAggregateSessionAnalysisGroupsStableErrorClasses(t *testing.T) {
+	messages := []domain.Message{
+		playerMessage(domain.TurnAnalysis{Errors: []domain.NegotiationError{
+			{Code: ErrorPressureTactic, Label: "Избыточное давление", Severity: domain.ErrorSeverityHigh, Message: "Давление"},
+		}}),
+		playerMessage(domain.TurnAnalysis{Errors: []domain.NegotiationError{
+			{Code: ErrorProposalOutsideLimit, Label: "Неприемлемые условия предложения", Severity: domain.ErrorSeverityCritical, Message: "За пределом"},
+			{Code: ErrorPressureTactic, Label: "Избыточное давление", Severity: domain.ErrorSeverityHigh, Message: "Давление"},
+		}}),
+	}
+
+	analysis := AggregateSessionAnalysis(messages)
+	if len(analysis.ErrorClasses) != 2 {
+		t.Fatalf("unexpected error classes: %+v", analysis.ErrorClasses)
+	}
+	if analysis.ErrorClasses[0].Code != ErrorProposalOutsideLimit || analysis.ErrorClasses[0].Severity != domain.ErrorSeverityCritical || analysis.ErrorClasses[0].Count != 1 {
+		t.Fatalf("critical error must be first: %+v", analysis.ErrorClasses)
+	}
+	pressure := analysis.ErrorClasses[1]
+	if pressure.Code != ErrorPressureTactic || pressure.Count != 2 || !reflect.DeepEqual(pressure.Turns, []int{1, 2}) {
+		t.Fatalf("unexpected pressure aggregation: %+v", pressure)
+	}
+}
+
 func playerMessage(analysis domain.TurnAnalysis) domain.Message {
 	return domain.Message{Sender: "player", Analysis: &analysis}
 }
