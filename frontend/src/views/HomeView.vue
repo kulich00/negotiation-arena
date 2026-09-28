@@ -273,6 +273,3 @@ function unlockHint(difficulty) {
 </template>
 
 
-
-
-

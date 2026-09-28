@@ -2088,9 +2088,9 @@ body {
 }
 [data-theme='light'] .checkpoint-actions::-webkit-scrollbar-thumb { background: #5b92e5; }
 [data-theme='dark'] .checkpoint-actions {
-  scrollbar-color: #705fc1 transparent;
+  scrollbar-color: #5ed8c8 transparent;
 }
-[data-theme='dark'] .checkpoint-actions::-webkit-scrollbar-thumb { background: #705fc1; }
+[data-theme='dark'] .checkpoint-actions::-webkit-scrollbar-thumb { background: #5ed8c8; }
 [data-theme='light'] .history-item { border-color: #b8d2e6; }
 [data-theme='light'] .history-item:hover {
   border-color: #5b92e5;
@@ -2539,10 +2539,6 @@ body {
 [data-theme='dark'] .player-stat-grid div::before {
   background: linear-gradient(90deg, #0f9f91, #6ee7d2);
 }
-
-
-
-
 
 
 
