@@ -1,5 +1,5 @@
-"""Compact intent language model for Negotiation Arena."""
+"""Compact PyTorch intent model for Negotiation Arena."""
 
-from .model import NGramIntentModel, Prediction
+from .model import Prediction, TorchIntentModel
 
-__all__ = ["NGramIntentModel", "Prediction"]
+__all__ = ["Prediction", "TorchIntentModel"]

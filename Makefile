@@ -13,7 +13,7 @@ backend-test:
 	cd backend && go test ./...
 
 model-train:
-	python -m ml.train --corpus corpus/seed-v1.jsonl --output ml/model/arena-intents-v1.json --version arena-intents-v1
+	python -m ml.train --corpus corpus/seed-v1.jsonl --output ml/model/arena-intents-v2.pt --version arena-intents-v2-pytorch
 
 model-eval:
 	python -m ml.evaluate --minimum-accuracy 0.85

@@ -11,16 +11,16 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .arena_model.model import NGramIntentModel, extract_alternative, extract_proposal_value
+    from .arena_model.model import TorchIntentModel, extract_alternative, extract_proposal_value
 except ImportError:
-    from arena_model.model import NGramIntentModel, extract_alternative, extract_proposal_value
+    from arena_model.model import TorchIntentModel, extract_alternative, extract_proposal_value
 
 
 MAX_REQUEST_BYTES = 64 * 1024
 
 
 class ModelApplication:
-    def __init__(self, model: NGramIntentModel, minimum_confidence: float = 0.55) -> None:
+    def __init__(self, model: TorchIntentModel, minimum_confidence: float = 0.55) -> None:
         if not 0 <= minimum_confidence <= 1:
             raise ValueError("minimum confidence must be between zero and one")
         self.model = model
@@ -64,7 +64,7 @@ class ModelApplication:
 
 def make_handler(application: ModelApplication) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ArenaLM/1"
+        server_version = "ArenaLM/2"
 
         def do_GET(self) -> None:
             if self.path == "/health":
@@ -102,11 +102,11 @@ def make_handler(application: ModelApplication) -> type[BaseHTTPRequestHandler]:
 
 
 def main() -> None:
-    model_path = Path(os.getenv("ARENA_MODEL_PATH", "/app/model/arena-intents-v1.json"))
+    model_path = Path(os.getenv("ARENA_MODEL_PATH", "/app/model/arena-intents-v2.pt"))
     address = os.getenv("ARENA_MODEL_ADDR", "0.0.0.0")
     port = int(os.getenv("ARENA_MODEL_PORT", "8090"))
     minimum_confidence = float(os.getenv("ARENA_MODEL_MIN_CONFIDENCE", "0.55"))
-    application = ModelApplication(NGramIntentModel.load(model_path), minimum_confidence)
+    application = ModelApplication(TorchIntentModel.load(model_path), minimum_confidence)
     server = ThreadingHTTPServer((address, port), make_handler(application))
     print(json.dumps({"event": "started", "address": address, "port": port, "modelVersion": application.model.version}), flush=True)
     server.serve_forever()

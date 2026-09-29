@@ -9,14 +9,14 @@ from collections import Counter
 from pathlib import Path
 
 try:
-    from .arena_model.model import NGramIntentModel, SUPPORTED_INTENTS
+    from .arena_model.model import SUPPORTED_INTENTS, TorchIntentModel
     from .train import read_examples
 except ImportError:
-    from arena_model.model import NGramIntentModel, SUPPORTED_INTENTS
+    from arena_model.model import SUPPORTED_INTENTS, TorchIntentModel
     from train import read_examples
 
 
-def evaluate(model: NGramIntentModel, examples: list[tuple[str, str]]) -> dict:
+def evaluate(model: TorchIntentModel, examples: list[tuple[str, str]]) -> dict:
     confusion: Counter[tuple[str, str]] = Counter()
     confidence_sum = 0.0
     for text, expected in examples:
@@ -51,11 +51,11 @@ def evaluate(model: NGramIntentModel, examples: list[tuple[str, str]]) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, default=Path("ml/model/arena-intents-v1.json"))
+    parser.add_argument("--model", type=Path, default=Path("ml/model/arena-intents-v2.pt"))
     parser.add_argument("--data", type=Path, default=Path("ml/data/eval-intents.jsonl"))
     parser.add_argument("--minimum-accuracy", type=float, default=0.0)
     args = parser.parse_args()
-    report = evaluate(NGramIntentModel.load(args.model), read_examples([args.data]))
+    report = evaluate(TorchIntentModel.load(args.model), read_examples([args.data]))
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if report["accuracy"] < args.minimum_accuracy:
         raise SystemExit(f"accuracy {report['accuracy']:.4f} is below {args.minimum_accuracy:.4f}")

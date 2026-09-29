@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from .arena_model.model import NGramIntentModel, SUPPORTED_INTENTS
+    from .arena_model.model import SUPPORTED_INTENTS, TorchIntentModel
 except ImportError:
-    from arena_model.model import NGramIntentModel, SUPPORTED_INTENTS
+    from arena_model.model import SUPPORTED_INTENTS, TorchIntentModel
 
 
 def read_examples(paths: list[Path]) -> list[tuple[str, str]]:
@@ -49,18 +49,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, action="append", default=[])
     parser.add_argument("--bootstrap", type=Path, default=Path("ml/data/bootstrap-intents.jsonl"))
-    parser.add_argument("--output", type=Path, default=Path("ml/model/arena-intents-v1.json"))
+    parser.add_argument("--output", type=Path, default=Path("ml/model/arena-intents-v2.pt"))
     parser.add_argument("--version", default="")
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     paths = [args.bootstrap, *args.corpus]
     examples = read_examples(paths)
     version = args.version or datetime.now(timezone.utc).strftime("arena-intents-%Y%m%d")
-    model = NGramIntentModel(version=version)
-    model.fit(examples)
+    model = TorchIntentModel(version=version)
+    training = model.fit(examples, epochs=args.epochs, seed=args.seed)
     model.save(args.output)
     counts = {intent: sum(1 for _, label in examples if label == intent) for intent in SUPPORTED_INTENTS}
-    print(json.dumps({"model": str(args.output), "version": version, "examples": len(examples), "intents": counts}, ensure_ascii=False))
+    print(json.dumps({
+        "model": str(args.output),
+        "version": version,
+        "examples": len(examples),
+        "parameters": model.parameter_count,
+        "training": training,
+        "intents": counts,
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":

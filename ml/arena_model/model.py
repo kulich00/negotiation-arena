@@ -1,18 +1,21 @@
-"""Dependency-free character n-gram language model for intent classification."""
+"""Small PyTorch intent model used by Negotiation Arena."""
 
 from __future__ import annotations
 
-import json
+import hashlib
 import math
 import re
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import torch
+from torch import nn
 
-MODEL_FORMAT = "arena-ngram-intent-v1"
+
+MODEL_FORMAT = "arena-pytorch-intent-v2"
 SUPPORTED_INTENTS = (
     "neutral",
     "ask_interest",
@@ -53,111 +56,150 @@ def features(value: str, minimum: int = 2, maximum: int = 5) -> Counter[str]:
     return result
 
 
-class NGramIntentModel:
+def _feature_index(value: str, dimension: int) -> int:
+    digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "little") % dimension
+
+
+def vectorize(value: str, dimension: int) -> torch.Tensor:
+    vector = torch.zeros(dimension, dtype=torch.float32)
+    for feature, count in features(value).items():
+        vector[_feature_index(feature, dimension)] += math.log1p(count)
+    norm = torch.linalg.vector_norm(vector)
+    if norm.item() > 0:
+        vector /= norm
+    return vector
+
+
+class IntentNetwork(nn.Module):
+    def __init__(self, feature_dimension: int, hidden_size: int, intent_count: int) -> None:
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(feature_dimension, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, intent_count),
+        )
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.layers(inputs)
+
+
+class TorchIntentModel:
     def __init__(
         self,
         *,
-        alpha: float = 0.35,
-        minimum_ngram: int = 2,
-        maximum_ngram: int = 5,
+        feature_dimension: int = 4096,
+        hidden_size: int = 96,
+        temperature: float = 2.5,
         version: str = "untrained",
     ) -> None:
-        if alpha <= 0 or minimum_ngram < 1 or maximum_ngram < minimum_ngram:
+        if feature_dimension < 128 or hidden_size < 8 or temperature <= 0:
             raise ValueError("invalid model hyperparameters")
-        self.alpha = alpha
-        self.minimum_ngram = minimum_ngram
-        self.maximum_ngram = maximum_ngram
+        self.feature_dimension = feature_dimension
+        self.hidden_size = hidden_size
+        self.temperature = temperature
         self.version = version
-        self.document_counts: Counter[str] = Counter()
-        self.feature_counts: dict[str, Counter[str]] = defaultdict(Counter)
-        self.feature_totals: Counter[str] = Counter()
-        self.vocabulary: set[str] = set()
+        self.network = IntentNetwork(feature_dimension, hidden_size, len(SUPPORTED_INTENTS))
+        self.network.eval()
 
-    def fit(self, examples: Iterable[tuple[str, str]]) -> None:
-        seen = 0
-        for text, intent in examples:
-            if intent not in SUPPORTED_INTENTS:
-                raise ValueError(f"unsupported intent {intent!r}")
-            item_features = features(text, self.minimum_ngram, self.maximum_ngram)
-            if not item_features:
-                continue
-            seen += 1
-            self.document_counts[intent] += 1
-            self.feature_counts[intent].update(item_features)
-            self.feature_totals[intent] += sum(item_features.values())
-            self.vocabulary.update(item_features)
-        if seen == 0:
+    @property
+    def parameter_count(self) -> int:
+        return sum(parameter.numel() for parameter in self.network.parameters())
+
+    def fit(
+        self,
+        examples: Iterable[tuple[str, str]],
+        *,
+        epochs: int = 200,
+        learning_rate: float = 0.02,
+        seed: int = 42,
+    ) -> dict[str, float | int]:
+        items = list(examples)
+        if not items:
             raise ValueError("training set is empty")
-        missing = set(SUPPORTED_INTENTS) - set(self.document_counts)
+        counts = Counter(intent for _, intent in items)
+        unknown = set(counts) - set(SUPPORTED_INTENTS)
+        if unknown:
+            raise ValueError(f"unsupported intents: {', '.join(sorted(unknown))}")
+        missing = set(SUPPORTED_INTENTS) - set(counts)
         if missing:
             raise ValueError(f"training set misses intents: {', '.join(sorted(missing))}")
+        if epochs < 1 or learning_rate <= 0:
+            raise ValueError("invalid training hyperparameters")
+
+        torch.manual_seed(seed)
+        self.network.apply(_reset_parameters)
+        inputs = torch.stack([vectorize(text, self.feature_dimension) for text, _ in items])
+        labels = torch.tensor([SUPPORTED_INTENTS.index(intent) for _, intent in items], dtype=torch.long)
+        weights = torch.tensor(
+            [math.sqrt(len(items) / (len(SUPPORTED_INTENTS) * counts[intent])) for intent in SUPPORTED_INTENTS],
+            dtype=torch.float32,
+        )
+        self.network.train()
+        optimizer = torch.optim.AdamW(self.network.parameters(), lr=learning_rate, weight_decay=1e-4)
+        loss_function = nn.CrossEntropyLoss(weight=weights)
+        final_loss = 0.0
+        for _ in range(epochs):
+            optimizer.zero_grad(set_to_none=True)
+            logits = self.network(inputs)
+            loss = loss_function(logits, labels)
+            loss.backward()
+            optimizer.step()
+            final_loss = loss.item()
+        self.network.eval()
+        with torch.no_grad():
+            accuracy = (self.network(inputs).argmax(dim=1) == labels).float().mean().item()
+        return {"epochs": epochs, "loss": final_loss, "trainingAccuracy": accuracy}
 
     def predict(self, text: str) -> Prediction:
-        item_features = features(text, self.minimum_ngram, self.maximum_ngram)
-        if not item_features:
+        normalized = normalize_text(text)
+        if not normalized:
             return Prediction("neutral", 1.0, {intent: 0.0 for intent in SUPPORTED_INTENTS})
-        total_documents = sum(self.document_counts.values())
-        vocabulary_size = max(1, len(self.vocabulary))
-        log_scores: dict[str, float] = {}
-        for intent in SUPPORTED_INTENTS:
-            documents = self.document_counts[intent]
-            score = math.log((documents + 1) / (total_documents + len(SUPPORTED_INTENTS)))
-            denominator = self.feature_totals[intent] + self.alpha * vocabulary_size
-            counts = self.feature_counts[intent]
-            for feature, count in item_features.items():
-                score += count * math.log((counts[feature] + self.alpha) / denominator)
-            log_scores[intent] = score
-        maximum = max(log_scores.values())
-        probabilities = {intent: math.exp(score - maximum) for intent, score in log_scores.items()}
-        probability_sum = sum(probabilities.values())
-        probabilities = {intent: value / probability_sum for intent, value in probabilities.items()}
-        intent = max(probabilities, key=probabilities.get)
-        return Prediction(intent, probabilities[intent], probabilities)
-
-    def to_dict(self) -> dict:
-        return {
-            "format": MODEL_FORMAT,
-            "version": self.version,
-            "alpha": self.alpha,
-            "minimumNGram": self.minimum_ngram,
-            "maximumNGram": self.maximum_ngram,
-            "documentCounts": dict(sorted(self.document_counts.items())),
-            "featureTotals": dict(sorted(self.feature_totals.items())),
-            "featureCounts": {
-                intent: dict(sorted(self.feature_counts[intent].items()))
-                for intent in SUPPORTED_INTENTS
-            },
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "NGramIntentModel":
-        if data.get("format") != MODEL_FORMAT:
-            raise ValueError("unsupported model format")
-        model = cls(
-            alpha=float(data["alpha"]),
-            minimum_ngram=int(data["minimumNGram"]),
-            maximum_ngram=int(data["maximumNGram"]),
-            version=str(data["version"]),
-        )
-        model.document_counts.update({key: int(value) for key, value in data["documentCounts"].items()})
-        model.feature_totals.update({key: int(value) for key, value in data["featureTotals"].items()})
-        for intent, counts in data["featureCounts"].items():
-            if intent not in SUPPORTED_INTENTS:
-                raise ValueError(f"unsupported intent in model: {intent}")
-            model.feature_counts[intent].update({key: int(value) for key, value in counts.items()})
-            model.vocabulary.update(counts)
-        missing = set(SUPPORTED_INTENTS) - set(model.document_counts)
-        if missing:
-            raise ValueError("model does not contain every supported intent")
-        return model
+        inputs = vectorize(normalized, self.feature_dimension).unsqueeze(0)
+        with torch.inference_mode():
+            probabilities = torch.softmax(self.network(inputs) / self.temperature, dim=1).squeeze(0)
+        index = int(probabilities.argmax().item())
+        scores = {intent: float(probabilities[position].item()) for position, intent in enumerate(SUPPORTED_INTENTS)}
+        return Prediction(SUPPORTED_INTENTS[index], scores[SUPPORTED_INTENTS[index]], scores)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+        torch.save(
+            {
+                "format": MODEL_FORMAT,
+                "version": self.version,
+                "featureDimension": self.feature_dimension,
+                "hiddenSize": self.hidden_size,
+                "temperature": self.temperature,
+                "intents": list(SUPPORTED_INTENTS),
+                "stateDict": self.network.state_dict(),
+            },
+            path,
+        )
 
     @classmethod
-    def load(cls, path: Path) -> "NGramIntentModel":
-        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    def load(cls, path: Path) -> "TorchIntentModel":
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        if checkpoint.get("format") != MODEL_FORMAT:
+            raise ValueError("unsupported model format")
+        if tuple(checkpoint.get("intents", ())) != SUPPORTED_INTENTS:
+            raise ValueError("model intents do not match the service")
+        model = cls(
+            feature_dimension=int(checkpoint["featureDimension"]),
+            hidden_size=int(checkpoint["hiddenSize"]),
+            temperature=float(checkpoint["temperature"]),
+            version=str(checkpoint["version"]),
+        )
+        model.network.load_state_dict(checkpoint["stateDict"])
+        model.network.eval()
+        return model
+
+
+def _reset_parameters(module: nn.Module) -> None:
+    reset = getattr(module, "reset_parameters", None)
+    if callable(reset):
+        reset()
 
 
 INTEGER_PATTERN = re.compile(r"(?<!\d)(\d{1,6})(?!\d)")

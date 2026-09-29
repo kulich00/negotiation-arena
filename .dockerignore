@@ -1,5 +1,7 @@
 .git
 .env
+.venv
+.tmp-pip
 **/.backend-completion-cache
 **/.go-cache
 **/.gocache*
