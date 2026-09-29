@@ -72,35 +72,28 @@ def vectorize(value: str, dimension: int) -> torch.Tensor:
 
 
 class IntentNetwork(nn.Module):
-    def __init__(self, feature_dimension: int, hidden_size: int, intent_count: int) -> None:
+    def __init__(self, feature_dimension: int, intent_count: int) -> None:
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(feature_dimension, hidden_size),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_size, intent_count),
-        )
+        self.direct = nn.Linear(feature_dimension, intent_count)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        return self.layers(inputs)
+        return self.direct(inputs)
 
 
 class TorchIntentModel:
     def __init__(
         self,
         *,
-        feature_dimension: int = 4096,
-        hidden_size: int = 96,
-        temperature: float = 2.5,
+        feature_dimension: int = 16384,
+        temperature: float = 0.7,
         version: str = "untrained",
     ) -> None:
-        if feature_dimension < 128 or hidden_size < 8 or temperature <= 0:
+        if feature_dimension < 128 or temperature <= 0:
             raise ValueError("invalid model hyperparameters")
         self.feature_dimension = feature_dimension
-        self.hidden_size = hidden_size
         self.temperature = temperature
         self.version = version
-        self.network = IntentNetwork(feature_dimension, hidden_size, len(SUPPORTED_INTENTS))
+        self.network = IntentNetwork(feature_dimension, len(SUPPORTED_INTENTS))
         self.network.eval()
 
     @property
@@ -111,7 +104,7 @@ class TorchIntentModel:
         self,
         examples: Iterable[tuple[str, str]],
         *,
-        epochs: int = 200,
+        epochs: int = 500,
         learning_rate: float = 0.02,
         seed: int = 42,
     ) -> dict[str, float | int]:
@@ -170,7 +163,6 @@ class TorchIntentModel:
                 "format": MODEL_FORMAT,
                 "version": self.version,
                 "featureDimension": self.feature_dimension,
-                "hiddenSize": self.hidden_size,
                 "temperature": self.temperature,
                 "intents": list(SUPPORTED_INTENTS),
                 "stateDict": self.network.state_dict(),
@@ -187,7 +179,6 @@ class TorchIntentModel:
             raise ValueError("model intents do not match the service")
         model = cls(
             feature_dimension=int(checkpoint["featureDimension"]),
-            hidden_size=int(checkpoint["hiddenSize"]),
             temperature=float(checkpoint["temperature"]),
             version=str(checkpoint["version"]),
         )

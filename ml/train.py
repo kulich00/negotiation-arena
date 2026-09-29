@@ -51,7 +51,7 @@ def main() -> None:
     parser.add_argument("--bootstrap", type=Path, default=Path("ml/data/bootstrap-intents.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("ml/model/arena-intents-v2.pt"))
     parser.add_argument("--version", default="")
-    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 

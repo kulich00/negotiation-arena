@@ -16,7 +16,7 @@ model-train:
 	python -m ml.train --corpus corpus/seed-v1.jsonl --output ml/model/arena-intents-v2.pt --version arena-intents-v2-pytorch
 
 model-eval:
-	python -m ml.evaluate --minimum-accuracy 0.85
+	python -m ml.evaluate --minimum-accuracy 0.90
 
 model-test:
 	python -m unittest ml.tests.test_model -v

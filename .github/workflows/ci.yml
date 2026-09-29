@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: ml/requirements.txt
       - run: pip install --index-url https://download.pytorch.org/whl/cpu -r ml/requirements.txt
       - run: python -m unittest scripts.test_prepare_corpus ml.tests.test_model -v
-      - run: python -m ml.evaluate --minimum-accuracy 0.85
+      - run: python -m ml.evaluate --minimum-accuracy 0.90
 
   docker:
     runs-on: ubuntu-latest

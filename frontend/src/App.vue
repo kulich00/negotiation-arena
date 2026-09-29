@@ -134,14 +134,18 @@ onUnmounted(() => {
             aria-label="Уменьшить масштаб текста"
             :disabled="textScale <= 90"
             @click="changeTextScale(-5)"
-          >A-</button>
+          >
+            A-
+          </button>
           <button
             type="button"
             title="Увеличить текст"
             aria-label="Увеличить масштаб текста"
             :disabled="textScale >= 115"
             @click="changeTextScale(5)"
-          >A+</button>
+          >
+            A+
+          </button>
         </div>
         <button
           class="theme-toggle"
