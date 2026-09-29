@@ -8,4 +8,5 @@ frontend/coverage/
 backend/bin/
 backend/coverage.out
 *.log
+/negotiation-arena/
 
