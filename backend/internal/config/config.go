@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,9 @@ type Config struct {
 	LLMAPIKeys            []string
 	LLMModel              string
 	LLMTimeout            time.Duration
+	ArenaModelURL         string
+	ArenaModelTimeout     time.Duration
+	ArenaModelConfidence  float64
 	LogLevel              string
 }
 
@@ -32,6 +36,14 @@ func Load() Config {
 	seconds, err := strconv.Atoi(getenv("LLM_TIMEOUT_SECONDS", "15"))
 	if err != nil || seconds <= 0 {
 		seconds = 15
+	}
+	arenaModelSeconds, err := strconv.Atoi(getenv("ARENA_MODEL_TIMEOUT_SECONDS", "2"))
+	if err != nil || arenaModelSeconds <= 0 {
+		arenaModelSeconds = 2
+	}
+	arenaModelConfidence, err := strconv.ParseFloat(getenv("ARENA_MODEL_MIN_CONFIDENCE", "0.55"), 64)
+	if err != nil || math.IsNaN(arenaModelConfidence) || math.IsInf(arenaModelConfidence, 0) || arenaModelConfidence <= 0 || arenaModelConfidence > 1 {
+		arenaModelConfidence = 0.55
 	}
 	adminSessionTTL, err := time.ParseDuration(getenv("ADMIN_SESSION_TTL", "12h"))
 	if err != nil || adminSessionTTL <= 0 {
@@ -79,6 +91,9 @@ func Load() Config {
 		LLMAPIKeys:            llmKeys,
 		LLMModel:              getenv("LLM_MODEL", "gemini-2.5-flash"),
 		LLMTimeout:            time.Duration(seconds) * time.Second,
+		ArenaModelURL:         strings.TrimSpace(os.Getenv("ARENA_MODEL_URL")),
+		ArenaModelTimeout:     time.Duration(arenaModelSeconds) * time.Second,
+		ArenaModelConfidence:  arenaModelConfidence,
 		LogLevel:              strings.ToLower(strings.TrimSpace(getenv("LOG_LEVEL", "info"))),
 	}
 }

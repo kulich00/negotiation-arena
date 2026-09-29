@@ -75,7 +75,7 @@
       "properties": {
         "intent": {"type": "string"},
         "technique": {"type": "string"},
-        "interpretationSource": {"enum": ["structured", "local", "gemini", "legacy", "unknown"]},
+        "interpretationSource": {"enum": ["structured", "local", "gemini", "arena_model", "legacy", "unknown"]},
         "replySource": {"enum": ["local", "gemini", "legacy", "custom", "unknown"]},
         "trustDelta": {"type": "integer"},
         "argumentDelta": {"type": "integer"},

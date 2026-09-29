@@ -46,6 +46,9 @@ func TestLoadLLMSettingsAndDefaults(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "gemini-key")
 	t.Setenv("LLM_MODEL", "")
 	t.Setenv("LLM_TIMEOUT_SECONDS", "0")
+	t.Setenv("ARENA_MODEL_URL", " http://model:8090 ")
+	t.Setenv("ARENA_MODEL_TIMEOUT_SECONDS", "invalid")
+	t.Setenv("ARENA_MODEL_MIN_CONFIDENCE", "2")
 
 	config := Load()
 	if config.LLMAPIKey != "gemini-key" {
@@ -56,6 +59,25 @@ func TestLoadLLMSettingsAndDefaults(t *testing.T) {
 	}
 	if config.LLMModel != "gemini-2.5-flash" || config.LLMTimeout != 15*time.Second {
 		t.Fatalf("unexpected LLM defaults: model=%q timeout=%s", config.LLMModel, config.LLMTimeout)
+	}
+	if config.ArenaModelURL != "http://model:8090" || config.ArenaModelTimeout != 2*time.Second || config.ArenaModelConfidence != 0.55 {
+		t.Fatalf("unexpected Arena model defaults: url=%q timeout=%s confidence=%v", config.ArenaModelURL, config.ArenaModelTimeout, config.ArenaModelConfidence)
+	}
+}
+
+func TestLoadArenaModelSettings(t *testing.T) {
+	t.Setenv("ARENA_MODEL_TIMEOUT_SECONDS", "4")
+	t.Setenv("ARENA_MODEL_MIN_CONFIDENCE", "0.72")
+	config := Load()
+	if config.ArenaModelTimeout != 4*time.Second || config.ArenaModelConfidence != 0.72 {
+		t.Fatalf("unexpected Arena model settings: %+v", config)
+	}
+}
+
+func TestLoadArenaModelRejectsNonFiniteConfidence(t *testing.T) {
+	t.Setenv("ARENA_MODEL_MIN_CONFIDENCE", "NaN")
+	if got := Load().ArenaModelConfidence; got != 0.55 {
+		t.Fatalf("ArenaModelConfidence = %v, want 0.55", got)
 	}
 }
 

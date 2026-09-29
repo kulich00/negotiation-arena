@@ -55,7 +55,12 @@ func main() {
 		os.Exit(1)
 	}
 	serviceOptions := []negotiation.ServiceOption{negotiation.WithReplyGenerator(replyGenerator), negotiation.WithMetrics(metricRegistry)}
-	if interpreter, ok := replyGenerator.(llm.MoveInterpreter); ok {
+	interpreter, err := configureMoveInterpreter(cfg, replyGenerator, logger, metricRegistry)
+	if err != nil {
+		logger.Error("move interpreter configuration failed", "error", err)
+		os.Exit(1)
+	}
+	if interpreter != nil {
 		serviceOptions = append(serviceOptions, negotiation.WithMoveInterpreter(interpreter))
 	}
 	service := negotiation.NewService(repo, llm.NewMockProvider(), serviceOptions...)
@@ -106,6 +111,26 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 	}
+}
+
+func configureMoveInterpreter(cfg config.Config, replyGenerator llm.ReplyGenerator, logger *slog.Logger, observer llm.Observer) (llm.MoveInterpreter, error) {
+	fallback, _ := replyGenerator.(llm.MoveInterpreter)
+	if fallback == nil {
+		fallback = llm.RuleBasedMoveInterpreter{}
+	}
+	if cfg.ArenaModelURL == "" {
+		return fallback, nil
+	}
+	interpreter, err := llm.NewArenaModelInterpreter(llm.ArenaModelConfig{
+		BaseURL: cfg.ArenaModelURL, Client: &http.Client{Timeout: cfg.ArenaModelTimeout},
+		MinConfidence: cfg.ArenaModelConfidence, Fallback: fallback,
+		Logger: logger, Observer: observer,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Arena intent model enabled", "url", cfg.ArenaModelURL, "minimumConfidence", cfg.ArenaModelConfidence)
+	return interpreter, nil
 }
 
 func newLogger(configuredLevel string) *slog.Logger {

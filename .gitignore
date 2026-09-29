@@ -11,6 +11,7 @@ backend/.gocache*/
 **/__pycache__/
 *.py[cod]
 corpus/exports/
+ml/reports/
 *.log
 /negotiation-arena/
 

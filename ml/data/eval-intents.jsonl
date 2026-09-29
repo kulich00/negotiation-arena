@@ -1,0 +1,33 @@
+{"text":"Добрый вечер, давайте начнем","intent":"neutral"}
+{"text":"Я пока просто изучаю информацию","intent":"neutral"}
+{"text":"Можно сделать небольшую паузу","intent":"neutral"}
+{"text":"Назовите параметры, которые для вас принципиальны","intent":"ask_interest"}
+{"text":"Чего вы ожидаете от идеальной сделки?","intent":"ask_interest"}
+{"text":"Каковы ваши приоритеты при выборе?","intent":"ask_interest"}
+{"text":"Каким образом задача выполняется сейчас?","intent":"ask_situation"}
+{"text":"Кто принимает окончательное решение?","intent":"ask_situation"}
+{"text":"Опишите действующую схему работы","intent":"ask_situation"}
+{"text":"Что именно тормозит выполнение проекта?","intent":"identify_problem"}
+{"text":"Где находится основное узкое место?","intent":"identify_problem"}
+{"text":"Какая трудность беспокоит вас сильнее всего?","intent":"identify_problem"}
+{"text":"Чем обернется дальнейшая задержка?","intent":"explore_implication"}
+{"text":"Каковы последствия бездействия?","intent":"explore_implication"}
+{"text":"Как это отразится на выручке?","intent":"explore_implication"}
+{"text":"Что вы выиграете после внедрения?","intent":"clarify_need_payoff"}
+{"text":"Какой эффект даст устранение причины?","intent":"clarify_need_payoff"}
+{"text":"Чем будет полезен более короткий цикл?","intent":"clarify_need_payoff"}
+{"text":"Эксперимент зафиксировал рост производительности на 14 процентов","intent":"present_evidence"}
+{"text":"Расчеты демонстрируют экономию бюджета","intent":"present_evidence"}
+{"text":"Отзывы трех заказчиков подтверждают надежность","intent":"present_evidence"}
+{"text":"Без сделки мы воспользуемся услугами конкурента","intent":"state_batna"}
+{"text":"В качестве альтернативы можем ничего не менять","intent":"state_batna"}
+{"text":"У меня остается возможность перенести закупку","intent":"state_batna"}
+{"text":"Могу предложить оплату двумя частями","intent":"propose"}
+{"text":"Давайте установим скидку пять процентов","intent":"propose"}
+{"text":"Предлагаю провести пилот в одном отделе","intent":"propose"}
+{"text":"Условия мне подходят, принимаю","intent":"accept"}
+{"text":"Согласен с вашим последним вариантом","intent":"accept"}
+{"text":"Подтверждаю договоренность","intent":"accept"}
+{"text":"Подписывайте немедленно, обсуждение окончено","intent":"pressure"}
+{"text":"Вы должны согласиться без дополнительных вопросов","intent":"pressure"}
+{"text":"Или принимаете сейчас, или я ухожу","intent":"pressure"}

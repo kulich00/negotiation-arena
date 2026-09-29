@@ -1,4 +1,4 @@
-.PHONY: dev test build frontend-install frontend-build backend-test migrate-up migrate-down
+.PHONY: dev test build frontend-install frontend-build backend-test model-train model-eval model-test migrate-up migrate-down
 
 dev:
 	docker compose up --build
@@ -11,6 +11,15 @@ frontend-build:
 
 backend-test:
 	cd backend && go test ./...
+
+model-train:
+	python -m ml.train --corpus corpus/seed-v1.jsonl --output ml/model/arena-intents-v1.json --version arena-intents-v1
+
+model-eval:
+	python -m ml.evaluate --minimum-accuracy 0.85
+
+model-test:
+	python -m unittest ml.tests.test_model -v
 
 test:
 	cd frontend && npm test -- --run

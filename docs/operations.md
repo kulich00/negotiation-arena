@@ -15,6 +15,7 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --tail 100 app
 docker compose logs --tail 100 db
+docker compose logs --tail 100 model
 ```
 
 Пересборка после изменения кода:
@@ -69,6 +70,16 @@ curl.exe -sS http://localhost:8080/metrics
 Экспортируются HTTP latency и статусы по шаблону маршрута, обращения к Gemini и
 fallback, игровые намерения и техники, изменения показателей, запуски и исходы
 сессий. ID игроков и сессий в labels не попадают.
+
+Готовность собственной модели проверяется отдельно:
+
+```powershell
+curl.exe -sS http://localhost:8090/health
+```
+
+Если контейнер `model` станет недоступен после запуска, backend продолжит
+работать через настроенный fallback и увеличит метрику
+`arena_llm_operations_total{operation="arena_model_interpretation",result="fallback"}`.
 
 Docker healthcheck использует liveness. Для проверки готовности приложения к
 трафику следует использовать readiness.

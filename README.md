@@ -29,6 +29,7 @@ Backend принимает окончательные решения детер�
 - request ID, структурированные журналы, rate limit и health endpoints;
 - Prometheus-метрики HTTP, Gemini/fallback, ходов, очков и исходов;
 - анонимизированный JSONL/JSON экспорт корпуса переговоров для обучения и evals;
+- собственная локальная ArenaLM для классификации свободных реплик;
 - единый production-контейнер со встроенной Vue SPA.
 
 ## Стек
@@ -64,6 +65,7 @@ docker compose ps
 - приложение: <http://localhost:8080>;
 - liveness: <http://localhost:8080/health/live>;
 - readiness: <http://localhost:8080/health/ready>;
+- ArenaLM: <http://localhost:8090/health>;
 - PostgreSQL: `localhost:5432`.
 
 `docker compose down` останавливает проект и сохраняет данные в volume
@@ -86,6 +88,11 @@ LLM_API_KEYS=ключ_1,ключ_2,ключ_3,ключ_4,ключ_5
 LLM_MODEL=gemini-2.5-flash
 LLM_TIMEOUT_SECONDS=15
 ```
+
+Docker Compose автоматически подключает ArenaLM через
+`ARENA_MODEL_URL=http://model:8090`. Она классифицирует намерения до обращения к
+внешней модели и использует существующий fallback при низкой уверенности.
+Обучение и устройство модели описаны в [ml/README.md](ml/README.md).
 
 `LLM_API_KEYS` принимает от 1 до 8 уникальных ключей. При `401`, `403` или
 `429` backend пробует следующий доступный ключ. Ключи с ошибками временно
@@ -162,6 +169,8 @@ backend/
   internal/llm/        Gemini и локальный fallback
   migrations/          миграции Goose
 frontend/              Vue SPA
+ml/                    обучение, eval и HTTP-сервис ArenaLM
+corpus/                схема и стартовый корпус диалогов
 docs/                  проектная документация
 ```
 
