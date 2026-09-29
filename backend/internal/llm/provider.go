@@ -69,6 +69,7 @@ type MoveInterpretation struct {
 	Intent        string `json:"intent"`
 	ProposalValue int    `json:"proposalValue"`
 	AlternativeID string `json:"alternativeId"`
+	Relevant      *bool  `json:"relevant,omitempty"`
 }
 
 // MoveInterpreter classifies natural language. Its output must still pass the
@@ -85,4 +86,8 @@ func NewPassthroughReplyGenerator() PassthroughReplyGenerator {
 
 func (PassthroughReplyGenerator) GenerateReply(_ context.Context, request ReplyRequest) (string, error) {
 	return request.BaseReply, nil
+}
+
+func (PassthroughReplyGenerator) InterpretMove(ctx context.Context, request InterpretationRequest) (MoveInterpretation, error) {
+	return (RuleBasedMoveInterpreter{}).InterpretMove(ctx, request)
 }

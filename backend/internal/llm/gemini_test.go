@@ -98,7 +98,7 @@ func TestGeminiGeneratorInterpretsMoveAsStructuredJSON(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"intent\":\"pressure\",\"proposalValue\":0,\"alternativeId\":\"\"}"}]}}]}`))
+		_, _ = writer.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"intent\":\"pressure\",\"proposalValue\":0,\"alternativeId\":\"\",\"relevant\":true}"}]}}]}`))
 	}))
 	defer server.Close()
 	generator, err := NewGeminiGenerator(GeminiConfig{APIKey: "test-key", BaseURL: server.URL, Client: server.Client()})
@@ -111,7 +111,7 @@ func TestGeminiGeneratorInterpretsMoveAsStructuredJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if interpretation.Intent != "pressure" || interpretation.ProposalValue != 0 || interpretation.AlternativeID != "" {
+	if interpretation.Intent != "pressure" || interpretation.ProposalValue != 0 || interpretation.AlternativeID != "" || interpretation.Relevant == nil || !*interpretation.Relevant {
 		t.Fatalf("unexpected interpretation: %+v", interpretation)
 	}
 	config := received.GenerationConfig

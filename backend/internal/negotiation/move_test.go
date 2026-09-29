@@ -127,7 +127,9 @@ func TestEvaluateMoveTracksSPINAndBATNA(t *testing.T) {
 	if needPayoff.TrustDelta != 2 || needPayoff.ArgumentDelta != 1 || !needPayoff.State.NeedPayoffEstablished || needPayoff.State.SPINStage != domain.SPINStageNeedPayoff {
 		t.Fatalf("unexpected need-payoff evaluation: %+v", needPayoff)
 	}
-	batna := EvaluateMove(PlayerMove{Intent: IntentStateBATNA}, needPayoff.State, rules)
+	preparedState := needPayoff.State
+	preparedState.InterestsExplored = true
+	batna := EvaluateMove(PlayerMove{Intent: IntentStateBATNA}, preparedState, rules)
 	if batna.ArgumentDelta != 1 || !batna.State.BATNADefined {
 		t.Fatalf("unexpected BATNA evaluation: %+v", batna)
 	}
@@ -136,18 +138,51 @@ func TestEvaluateMoveTracksSPINAndBATNA(t *testing.T) {
 func TestEvaluateImplicationBeforeProblemHasReducedImpact(t *testing.T) {
 	rules := domain.DefaultScenarioRules()
 	evaluation := EvaluateMove(PlayerMove{Intent: IntentExploreImplication}, domain.InitialSessionState(), rules)
-	if evaluation.ArgumentDelta != 1 || !evaluation.State.ImplicationsExplored || evaluation.State.SPINStage != domain.SPINStageNone {
+	if evaluation.ArgumentDelta != 0 || !evaluation.State.ImplicationsExplored || evaluation.State.SPINStage != domain.SPINStageNone {
 		t.Fatalf("unexpected out-of-order implication evaluation: %+v", evaluation)
 	}
 
 	problem := EvaluateMove(PlayerMove{Intent: IntentIdentifyProblem}, domain.InitialSessionState(), rules)
-	if problem.TrustDelta != 0 || problem.ArgumentDelta != 1 || problem.State.SPINStage != domain.SPINStageNone {
+	if problem.TrustDelta != 0 || problem.ArgumentDelta != 0 || problem.State.SPINStage != domain.SPINStageNone {
 		t.Fatalf("unexpected out-of-order problem evaluation: %+v", problem)
 	}
 
 	needPayoff := EvaluateMove(PlayerMove{Intent: IntentClarifyNeedPayoff}, domain.InitialSessionState(), rules)
-	if needPayoff.TrustDelta != 1 || needPayoff.ArgumentDelta != 0 || needPayoff.State.SPINStage != domain.SPINStageNone {
+	if needPayoff.TrustDelta != 0 || needPayoff.ArgumentDelta != 0 || needPayoff.State.SPINStage != domain.SPINStageNone {
 		t.Fatalf("unexpected out-of-order need-payoff evaluation: %+v", needPayoff)
+	}
+}
+
+func TestEvaluateMoveRequiresContextForEvidenceBATNAAndProposal(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+
+	evidence := EvaluateMove(PlayerMove{Intent: IntentPresentEvidence}, domain.InitialSessionState(), rules)
+	if evidence.TrustDelta != 0 || evidence.ArgumentDelta != 1 {
+		t.Fatalf("evidence before interests received full reward: %+v", evidence)
+	}
+	batna := EvaluateMove(PlayerMove{Intent: IntentStateBATNA}, domain.InitialSessionState(), rules)
+	if batna.ArgumentDelta != 0 {
+		t.Fatalf("BATNA before interests changed argument score: %+v", batna)
+	}
+	proposal := EvaluateMove(PlayerMove{Content: "Предлагаю условия", Intent: IntentPropose}, domain.InitialSessionState(), rules)
+	if proposal.TrustDelta != 0 {
+		t.Fatalf("premature proposal changed trust: %+v", proposal)
+	}
+}
+
+func TestEvaluateMoveDoesNotRewardCompletedStepAgain(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	first := EvaluateMove(PlayerMove{Intent: IntentAskInterest}, domain.InitialSessionState(), rules)
+	second := EvaluateMove(PlayerMove{Intent: IntentAskInterest}, first.State, rules)
+	if second.TrustDelta != 0 || !second.Repeated {
+		t.Fatalf("completed interest step was rewarded twice: %+v", second)
+	}
+
+	prepared := first.State
+	firstEvidence := EvaluateMove(PlayerMove{Intent: IntentPresentEvidence}, prepared, rules)
+	additionalEvidence := EvaluateMove(PlayerMove{Intent: IntentPresentEvidence}, firstEvidence.State, rules)
+	if additionalEvidence.TrustDelta != 0 || additionalEvidence.ArgumentDelta != 1 {
+		t.Fatalf("additional evidence received the initial reward again: %+v", additionalEvidence)
 	}
 }
 

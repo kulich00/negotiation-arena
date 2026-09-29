@@ -13,7 +13,7 @@ func TestAnalyzeStructuredMoveExplainsMissingPreparation(t *testing.T) {
 	evaluation := EvaluateMove(move, domain.InitialSessionState(), rules)
 
 	analysis := AnalyzeStructuredMove(move, domain.InitialSessionState(), rules, evaluation)
-	if analysis.Technique != "harvard_mutual_gain" || analysis.TrustDelta != 1 {
+	if analysis.Technique != "harvard_mutual_gain" || analysis.TrustDelta != 0 {
 		t.Fatalf("unexpected analysis: %+v", analysis)
 	}
 	if len(analysis.Risks) != 2 || analysis.Recommendation == "" {
@@ -55,7 +55,7 @@ func TestAnalyzeStructuredMoveExplainsSPINOrder(t *testing.T) {
 	evaluation := EvaluateMove(move, domain.InitialSessionState(), rules)
 
 	analysis := AnalyzeStructuredMove(move, domain.InitialSessionState(), rules, evaluation)
-	if analysis.Technique != "spin_implication" || analysis.ArgumentDelta != 1 {
+	if analysis.Technique != "spin_implication" || analysis.ArgumentDelta != 0 {
 		t.Fatalf("unexpected analysis: %+v", analysis)
 	}
 	if len(analysis.Risks) != 1 || analysis.Recommendation != "Сначала согласуйте, какую именно проблему необходимо решить." {

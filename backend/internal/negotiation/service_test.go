@@ -117,8 +117,8 @@ func TestProcessMovePersistsDeterministicState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !turn.Session.State.OfferAccepted {
-		t.Fatalf("accepted offer was not persisted: %+v", turn.Session.State)
+	if !turn.Session.State.OfferAccepted || turn.Result == nil || turn.Session.Status != domain.SessionStatusFinished {
+		t.Fatalf("accepted offer did not finish the dialogue: %+v", turn)
 	}
 	messages, err := service.Messages(context.Background(), session.ID)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestProcessMoveRejectsAcceptanceOfRejectedOffer(t *testing.T) {
 	}
 }
 
-func TestProcessMessageAutomaticallyFinishesAtTurnLimit(t *testing.T) {
+func TestProcessMessageContinuesPastConfiguredTurnCount(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	service := NewService(repo, llm.NewMockProvider())
 	rules := domain.DefaultScenarioRules()
@@ -214,24 +214,24 @@ func TestProcessMessageAutomaticallyFinishesAtTurnLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.Result == nil || turn.Session.Status != domain.SessionStatusFinished || turn.Session.State.Phase != domain.PhaseFinished {
-		t.Fatalf("last turn did not finish the session: %+v", turn)
+	if turn.Result != nil || turn.Session.Status != domain.SessionStatusActive {
+		t.Fatalf("unresolved dialogue was finished at the configured turn count: %+v", turn)
 	}
-	stored, err := service.Result(context.Background(), session.ID)
+	turn, err = service.ProcessMessage(context.Background(), session.ID, "Второй ход")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Session.Turn != 2 || turn.Session.Status != domain.SessionStatusActive {
+		t.Fatalf("dialogue did not continue past maxTurns: %+v", turn.Session)
+	}
+	stored, err := service.Finish(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.SessionID != session.ID || stored.OutcomeCode == "" {
-		t.Fatalf("automatic result was not stored: %+v", stored)
+		t.Fatalf("explicit result was not stored: %+v", stored)
 	}
-	repeated, err := service.Finish(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repeated.OutcomeCode != stored.OutcomeCode || repeated.FinalScore != stored.FinalScore {
-		t.Fatalf("idempotent finish returned a different result: first=%+v repeated=%+v", stored, repeated)
-	}
-	if _, err := service.ProcessMessage(context.Background(), session.ID, "Второй ход"); !errors.Is(err, repository.ErrConflict) {
+	if _, err := service.ProcessMessage(context.Background(), session.ID, "Третий ход"); !errors.Is(err, repository.ErrConflict) {
 		t.Fatalf("expected finished-session conflict, got %v", err)
 	}
 }
@@ -448,6 +448,52 @@ func TestProcessMessageFallsBackToLocalAnalysisWhenInterpretationFails(t *testin
 	if turn.Session.TrustScore != 49 || turn.Analysis.Intent != "legacy" {
 		t.Fatalf("local fallback was not used: %+v", turn)
 	}
+}
+
+func TestProcessMessageUpdatesScoresFromMeaningAndDoesNotRewardRepeatedPhrase(t *testing.T) {
+	service := NewService(
+		repository.NewMemoryRepository(), llm.NewMockProvider(),
+		WithMoveInterpreter(llm.NewPassthroughReplyGenerator()),
+	)
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "vendor-introduction")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	question := "Что для вас важно при выборе условий поставки?"
+	first, err := service.ProcessMessage(context.Background(), session.ID, question)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Session.TrustScore != 52 || first.Analysis.Intent != string(IntentAskInterest) {
+		t.Fatalf("interest question was not scored by meaning: %+v", first)
+	}
+	repeated, err := service.ProcessMessage(context.Background(), session.ID, question)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repeated.Session.TrustScore != first.Session.TrustScore || repeated.Analysis.TrustDelta != 0 || !hasErrorCode(repeated.Analysis, ErrorRepeatedMove) {
+		t.Fatalf("repeated phrase received a reward: %+v", repeated)
+	}
+	evidence, err := service.ProcessMessage(context.Background(), session.ID, "По данным теста, срок поставки снизился на 20 процентов.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Session.TrustScore != 53 || evidence.Session.ArgumentScore != 2 || evidence.Analysis.Intent != string(IntentPresentEvidence) {
+		t.Fatalf("evidence did not update trust and argument scores: %+v", evidence)
+	}
+}
+
+func hasErrorCode(analysis domain.TurnAnalysis, code string) bool {
+	for _, item := range analysis.Errors {
+		if item.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func TestProcessMovePersistsSPINAndBATNAState(t *testing.T) {

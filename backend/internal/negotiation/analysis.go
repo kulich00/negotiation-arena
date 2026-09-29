@@ -143,6 +143,15 @@ func AnalyzeStructuredMove(move PlayerMove, before domain.SessionState, rules do
 		))
 		analysis.Recommendation = "Замените требование открытым вопросом, фактами или взаимовыгодным вариантом."
 	}
+	if evaluation.Repeated {
+		analysis.Strengths = []string{}
+		analysis.Summary = "Повтор уже отработанного переговорного действия не изменил показатели."
+		addNegotiationError(&analysis, negotiationError(
+			ErrorRepeatedMove, "Повтор переговорного действия",
+			domain.ErrorSeverityLow, "Повторение реплики без нового контекста не продвигает переговоры",
+		))
+		analysis.Recommendation = "Добавьте новый факт, уточните ответ собеседника или перейдите к следующему этапу переговоров."
+	}
 	if evaluation.OpponentReaction != nil {
 		reaction := *evaluation.OpponentReaction
 		analysis.OpponentReaction = &reaction

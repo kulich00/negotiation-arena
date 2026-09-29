@@ -41,6 +41,7 @@ type MoveEvaluation struct {
 	TrustDelta       int
 	ArgumentDelta    int
 	PressureDelta    int
+	Repeated         bool
 	State            domain.SessionState
 	OpponentReaction *domain.OpponentReaction
 }
@@ -128,25 +129,46 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		// A neutral or unclear phrase advances the turn without rewarding or
 		// penalizing it. Hostile phrases are classified separately as pressure.
 	case IntentAskInterest:
-		evaluation.TrustDelta = 2
+		if state.InterestsExplored {
+			evaluation.Repeated = true
+		} else {
+			evaluation.TrustDelta = 2
+		}
 		evaluation.State.InterestsExplored = true
 		advanceToExploration(&evaluation.State)
 	case IntentPresentEvidence:
-		evaluation.TrustDelta = 1
-		evaluation.ArgumentDelta = 2
+		switch {
+		case state.EvidencePresented:
+			// A genuinely new fact may still strengthen the case, but repeating
+			// evidence no longer builds trust indefinitely.
+			evaluation.ArgumentDelta = 1
+		case !rules.RequiresInterestExploration || state.InterestsExplored:
+			evaluation.TrustDelta = 1
+			evaluation.ArgumentDelta = 2
+		default:
+			// A fact without a connection to the opponent's interests has some
+			// argumentative value, but does not build trust yet.
+			evaluation.ArgumentDelta = 1
+		}
 		evaluation.State.EvidencePresented = true
 		advanceToExploration(&evaluation.State)
 	case IntentAskSituation:
-		evaluation.TrustDelta = 1
+		if state.SituationExplored {
+			evaluation.Repeated = true
+		} else {
+			evaluation.TrustDelta = 1
+		}
 		evaluation.State.SituationExplored = true
 		if evaluation.State.SPINStage < domain.SPINStageSituation {
 			evaluation.State.SPINStage = domain.SPINStageSituation
 		}
 		advanceToExploration(&evaluation.State)
 	case IntentIdentifyProblem:
-		evaluation.ArgumentDelta = 1
 		evaluation.State.ProblemIdentified = true
-		if state.SPINStage >= domain.SPINStageSituation {
+		if state.ProblemIdentified {
+			evaluation.Repeated = true
+		} else if state.SPINStage >= domain.SPINStageSituation {
+			evaluation.ArgumentDelta = 1
 			evaluation.TrustDelta = 1
 		}
 		if state.SPINStage == domain.SPINStageSituation {
@@ -154,8 +176,9 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		}
 		advanceToExploration(&evaluation.State)
 	case IntentExploreImplication:
-		evaluation.ArgumentDelta = 1
-		if state.SPINStage >= domain.SPINStageProblem {
+		if state.ImplicationsExplored {
+			evaluation.Repeated = true
+		} else if state.SPINStage >= domain.SPINStageProblem {
 			evaluation.ArgumentDelta = 2
 		}
 		evaluation.State.ImplicationsExplored = true
@@ -164,8 +187,9 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		}
 		advanceToExploration(&evaluation.State)
 	case IntentClarifyNeedPayoff:
-		evaluation.TrustDelta = 1
-		if state.SPINStage >= domain.SPINStageImplication {
+		if state.NeedPayoffEstablished {
+			evaluation.Repeated = true
+		} else if state.SPINStage >= domain.SPINStageImplication {
 			evaluation.TrustDelta = 2
 			evaluation.ArgumentDelta = 1
 		}
@@ -175,14 +199,25 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		}
 		advanceToExploration(&evaluation.State)
 	case IntentStateBATNA:
-		evaluation.ArgumentDelta = 1
+		if state.BATNADefined {
+			evaluation.Repeated = true
+		} else if state.InterestsExplored {
+			evaluation.ArgumentDelta = 1
+		}
 		evaluation.State.BATNADefined = true
 		advanceToExploration(&evaluation.State)
 	case IntentPropose:
-		evaluation.TrustDelta = 1
 		evaluation.State.OfferMade = true
 		evaluation.State.Phase = domain.PhaseBargaining
 		evaluation.State.LastOfferQuality = proposalQuality(move.Proposal, rules.Proposal)
+		prerequisitesMet := (!rules.RequiresInterestExploration || state.InterestsExplored) &&
+			(!rules.RequiresEvidence || state.EvidencePresented)
+		switch {
+		case evaluation.State.LastOfferQuality == domain.OfferQualityRejected:
+			evaluation.TrustDelta = -2
+		case prerequisitesMet:
+			evaluation.TrustDelta = 1
+		}
 		if move.Proposal == nil {
 			evaluation.State.LastOfferID = "free_form"
 		} else if move.Proposal.AlternativeID != "" {
@@ -199,6 +234,20 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		evaluation.PressureDelta = 2
 	}
 
+	return evaluation
+}
+
+func suppressRepeatedRewards(evaluation MoveEvaluation) MoveEvaluation {
+	evaluation.Repeated = true
+	if evaluation.TrustDelta > 0 {
+		evaluation.TrustDelta = 0
+	}
+	if evaluation.ArgumentDelta > 0 {
+		evaluation.ArgumentDelta = 0
+	}
+	if evaluation.OpponentReaction != nil && evaluation.OpponentReaction.TrustDelta > 0 {
+		evaluation.OpponentReaction.TrustDelta = 0
+	}
 	return evaluation
 }
 

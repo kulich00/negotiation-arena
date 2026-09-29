@@ -12,6 +12,7 @@ const (
 	ErrorProposalWithoutEvidence         = "proposal_without_evidence"
 	ErrorProposalOutsideLimit            = "proposal_outside_limit"
 	ErrorPressureTactic                  = "pressure_tactic"
+	ErrorRepeatedMove                    = "repeated_move"
 )
 
 func negotiationError(code, label string, severity domain.ErrorSeverity, message string) domain.NegotiationError {

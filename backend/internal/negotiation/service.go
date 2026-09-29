@@ -241,13 +241,6 @@ func (s *Service) ForkSession(ctx context.Context, parentID string, turn int) (d
 	if err != nil {
 		return domain.Session{}, err
 	}
-	scenario, err := s.repo.Scenario(ctx, parent.ScenarioID)
-	if err != nil {
-		return domain.Session{}, err
-	}
-	if turn >= scenario.Rules.MaxTurns {
-		return domain.Session{}, ErrInvalidFork
-	}
 	checkpoints, err := s.repo.Checkpoints(ctx, parentID)
 	if err != nil {
 		return domain.Session{}, err
@@ -313,9 +306,7 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	if err != nil {
 		return TurnResult{}, err
 	}
-	if session.Turn >= scenario.Rules.MaxTurns {
-		return TurnResult{}, ErrTurnLimitReached
-	}
+	repeatedMessage := s.isRepeatedPlayerMessage(ctx, session.ID, message)
 	effectiveMove := move
 	interpretationFailed := false
 	if move == nil && s.moveInterpreter != nil {
@@ -344,6 +335,9 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 		}
 		evaluation = EvaluateMove(*effectiveMove, session.State, scenario.Rules)
 		evaluation = ApplyOpponentBehavior(*effectiveMove, session.Turn+1, scenario.Rules, evaluation)
+		if repeatedMessage || evaluation.Repeated {
+			evaluation = suppressRepeatedRewards(evaluation)
+		}
 		reply = GenerateOpponentReply(*effectiveMove, session, scenario.Rules, evaluation)
 		analysis = AnalyzeStructuredMove(*effectiveMove, session.State, scenario.Rules, evaluation)
 	} else {
@@ -380,7 +374,7 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 		return TurnResult{}, err
 	}
 	turnResult := TurnResult{Reply: reply, Session: session, Analysis: analysis}
-	if session.Turn == scenario.Rules.MaxTurns {
+	if session.State.OfferAccepted {
 		finishedSession, result, err := s.finalize(ctx, session, scenario, domain.SessionStatusFinished)
 		if err != nil {
 			return TurnResult{}, err
@@ -404,6 +398,9 @@ func (s *Service) interpretMove(ctx context.Context, message string, session dom
 	if err != nil {
 		return nil, err
 	}
+	if interpretation.Relevant != nil && !*interpretation.Relevant {
+		return &PlayerMove{Content: message, Intent: IntentNeutral}, nil
+	}
 	move := PlayerMove{Content: message, Intent: MoveIntent(interpretation.Intent)}
 	if move.Intent == IntentPropose && rules.Proposal.Kind != "none" {
 		switch {
@@ -414,12 +411,47 @@ func (s *Service) interpretMove(ctx context.Context, message string, session dom
 		}
 	}
 	if err := ValidateMove(move, rules); err != nil {
-		return nil, nil
+		return &PlayerMove{Content: message, Intent: IntentNeutral}, nil
 	}
 	if move.Intent == IntentAccept && (!session.State.OfferMade || session.State.LastOfferQuality == domain.OfferQualityRejected) {
-		return nil, nil
+		return &PlayerMove{Content: message, Intent: IntentNeutral}, nil
 	}
 	return &move, nil
+}
+
+func (s *Service) isRepeatedPlayerMessage(ctx context.Context, sessionID, message string) bool {
+	normalized := normalizeMessageForComparison(message)
+	if normalized == "" {
+		return false
+	}
+	messages, err := s.repo.Messages(ctx, sessionID)
+	if err != nil {
+		return false
+	}
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Sender == "player" && normalizeMessageForComparison(messages[index].Content) == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeMessageForComparison(value string) string {
+	var normalized strings.Builder
+	spacePending := false
+	for _, char := range strings.ToLower(strings.TrimSpace(value)) {
+		switch {
+		case unicode.IsLetter(char) || unicode.IsDigit(char):
+			if spacePending && normalized.Len() > 0 {
+				normalized.WriteByte(' ')
+			}
+			normalized.WriteRune(char)
+			spacePending = false
+		case unicode.IsSpace(char) || unicode.IsPunct(char):
+			spacePending = true
+		}
+	}
+	return normalized.String()
 }
 
 func (s *Service) generateReply(ctx context.Context, baseReply, playerMessage string, session domain.Session, scenario domain.Scenario, state domain.SessionState) string {

@@ -43,7 +43,7 @@ func TestApplyOpponentBehaviorTracksMoodAndPriority(t *testing.T) {
 
 	guardedState := shifted.State
 	guarded := ApplyOpponentBehavior(evidenceMove, 6, rules, EvaluateMove(evidenceMove, guardedState, rules))
-	if guarded.OpponentReaction == nil || guarded.OpponentReaction.Mood != OpponentMoodGuarded || guarded.TrustDelta != 0 {
+	if guarded.OpponentReaction == nil || guarded.OpponentReaction.Mood != OpponentMoodGuarded || guarded.TrustDelta != -1 {
 		t.Fatalf("unexpected volatile reaction: %+v", guarded)
 	}
 }

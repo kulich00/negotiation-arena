@@ -7,6 +7,7 @@ frontend/dist/
 frontend/coverage/
 backend/bin/
 backend/coverage.out
+backend/.gocache/
 *.log
 /negotiation-arena/
 
