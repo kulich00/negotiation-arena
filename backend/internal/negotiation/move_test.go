@@ -186,6 +186,16 @@ func TestEvaluateMoveDoesNotRewardCompletedStepAgain(t *testing.T) {
 	}
 }
 
+func TestEvaluateMoveDoesNotRewardSameOfferTwice(t *testing.T) {
+	rules := domain.DefaultScenarioRules()
+	prepared := domain.SessionState{InterestsExplored: true, EvidencePresented: true}
+	first := EvaluateMove(PlayerMove{Intent: IntentPropose}, prepared, rules)
+	second := EvaluateMove(PlayerMove{Intent: IntentPropose}, first.State, rules)
+	if first.TrustDelta != 1 || second.TrustDelta != 0 || !second.Repeated {
+		t.Fatalf("unexpected repeated offer evaluation: first=%+v second=%+v", first, second)
+	}
+}
+
 func TestEvaluateProposalQuality(t *testing.T) {
 	rules := domain.DefaultScenarioRules()
 	rules.Proposal = domain.ProposalConstraint{

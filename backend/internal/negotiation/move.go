@@ -225,6 +225,9 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		} else {
 			evaluation.State.LastOfferID = fmt.Sprintf("%s:%d", move.Proposal.Kind, move.Proposal.Value)
 		}
+		if state.OfferMade && state.LastOfferID == evaluation.State.LastOfferID {
+			evaluation.Repeated = true
+		}
 	case IntentAccept:
 		evaluation.TrustDelta = 2
 		evaluation.State.OfferAccepted = true
@@ -234,6 +237,9 @@ func EvaluateMove(move PlayerMove, state domain.SessionState, rules domain.Scena
 		evaluation.PressureDelta = 2
 	}
 
+	if evaluation.Repeated {
+		return suppressRepeatedRewards(evaluation)
+	}
 	return evaluation
 }
 
