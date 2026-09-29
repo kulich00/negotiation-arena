@@ -3,6 +3,7 @@ package negotiation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
@@ -402,6 +403,46 @@ func TestProcessMoveFallsBackWhenReplyGeneratorFails(t *testing.T) {
 	}
 	if turn.Reply == "" {
 		t.Fatal("expected deterministic fallback reply")
+	}
+}
+
+func TestOfflineFallbackStaysVariedDuringLongConversation(t *testing.T) {
+	service := NewService(
+		repository.NewMemoryRepository(), llm.NewMockProvider(),
+		WithReplyGenerator(failingReplyGenerator{}),
+	)
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.StartSession(context.Background(), "vendor-introduction")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen := make(map[string]struct{})
+	previous := ""
+	for turn := 0; turn < 18; turn++ {
+		result, err := service.ProcessMove(context.Background(), session.ID, PlayerMove{
+			Content: fmt.Sprintf("Уточнение без конкретного действия номер %d", turn+1),
+			Intent:  IntentNeutral,
+		})
+		if err != nil {
+			t.Fatalf("turn %d: %v", turn+1, err)
+		}
+		if result.Reply == previous {
+			t.Fatalf("consecutive fallback duplicate on turn %d: %q", turn+1, result.Reply)
+		}
+		if len([]rune(result.Reply)) < 40 {
+			t.Fatalf("fallback reply is too weak on turn %d: %q", turn+1, result.Reply)
+		}
+		if result.Session.Status != domain.SessionStatusActive {
+			t.Fatalf("fallback conversation stopped unexpectedly on turn %d", turn+1)
+		}
+		seen[result.Reply] = struct{}{}
+		previous = result.Reply
+	}
+	if len(seen) != 18 {
+		t.Fatalf("fallback produced %d unique replies in 18 turns", len(seen))
 	}
 }
 

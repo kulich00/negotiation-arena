@@ -70,7 +70,7 @@ func TestGenerateOpponentReplyByIntent(t *testing.T) {
 	for _, test := range tests {
 		t.Run(string(test.intent), func(t *testing.T) {
 			move := PlayerMove{Intent: test.intent}
-			evaluation := EvaluateMove(move, session.State, rules)
+			evaluation := MoveEvaluation{State: session.State}
 			if got := GenerateOpponentReply(move, session, rules, evaluation); got != test.want {
 				t.Fatalf("unexpected reply: %q", got)
 			}
@@ -142,6 +142,79 @@ func TestGenerateOpponentReplyRejectsOfferBeyondConcessionLimit(t *testing.T) {
 	want := "Это выходит за мой предел уступки. Готов обсуждать значение не более 10."
 	if got != want {
 		t.Fatalf("unexpected reply: %q", got)
+	}
+}
+
+func TestGenerateOpponentReplyVariesByTurnWithoutLLM(t *testing.T) {
+	tests := []struct {
+		name string
+		move PlayerMove
+	}{
+		{name: "neutral", move: PlayerMove{Intent: IntentNeutral}},
+		{name: "interests", move: PlayerMove{Intent: IntentAskInterest}},
+		{name: "evidence", move: PlayerMove{Intent: IntentPresentEvidence}},
+		{name: "situation", move: PlayerMove{Intent: IntentAskSituation}},
+		{name: "pressure", move: PlayerMove{Intent: IntentPressure}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			seen := make(map[string]struct{})
+			previous := ""
+			for turn := 0; turn < 4; turn++ {
+				session := domain.Session{Turn: turn, TrustScore: 60, State: readyState()}
+				evaluation := MoveEvaluation{State: session.State}
+				reply := GenerateOpponentReply(test.move, session, domain.DefaultScenarioRules(), evaluation)
+				if reply == previous {
+					t.Fatalf("consecutive duplicate on turn %d: %q", turn, reply)
+				}
+				if len([]rune(reply)) < 20 {
+					t.Fatalf("reply is not actionable: %q", reply)
+				}
+				seen[reply] = struct{}{}
+				previous = reply
+			}
+			if len(seen) < 4 {
+				t.Fatalf("only %d unique replies generated", len(seen))
+			}
+		})
+	}
+}
+
+func TestRepeatedMoveRepliesExplainNextStepAndDoNotLoop(t *testing.T) {
+	intents := []MoveIntent{
+		IntentAskInterest,
+		IntentPresentEvidence,
+		IntentAskSituation,
+		IntentIdentifyProblem,
+		IntentExploreImplication,
+		IntentClarifyNeedPayoff,
+		IntentStateBATNA,
+		IntentPropose,
+		IntentPressure,
+	}
+	for _, intent := range intents {
+		t.Run(string(intent), func(t *testing.T) {
+			seen := make(map[string]struct{})
+			previous := ""
+			for turn := 0; turn < 6; turn++ {
+				session := domain.Session{Turn: turn, TrustScore: 60, State: readyState()}
+				reply := GenerateOpponentReply(
+					PlayerMove{Intent: intent}, session, domain.DefaultScenarioRules(),
+					MoveEvaluation{State: session.State, Repeated: true},
+				)
+				if reply == previous {
+					t.Fatalf("consecutive duplicate on turn %d: %q", turn, reply)
+				}
+				if len([]rune(reply)) < 40 {
+					t.Fatalf("repeated move reply lacks a next step: %q", reply)
+				}
+				seen[reply] = struct{}{}
+				previous = reply
+			}
+			if len(seen) != 6 {
+				t.Fatalf("got %d unique replies, want 6", len(seen))
+			}
+		})
 	}
 }
 

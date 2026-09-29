@@ -15,7 +15,7 @@ type RuleBasedMoveInterpreter struct{}
 var integerPattern = regexp.MustCompile(`\d+`)
 
 func (RuleBasedMoveInterpreter) InterpretMove(_ context.Context, request InterpretationRequest) (MoveInterpretation, error) {
-	message := strings.ToLower(strings.TrimSpace(request.Message))
+	message := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(request.Message)), "ё", "е")
 	result := MoveInterpretation{Intent: "neutral", Relevant: boolPointer(false)}
 	if message == "" {
 		return result, nil
@@ -24,11 +24,11 @@ func (RuleBasedMoveInterpreter) InterpretMove(_ context.Context, request Interpr
 	switch {
 	case containsAnyPhrase(message, "иначе", "обязаны", "должны", "требую", "пожалеете", "последний шанс", "нет выбора"):
 		result.Intent = "pressure"
-	case request.OfferMade && containsAnyPhrase(message, "согласен", "согласна", "принимаю", "договорились", "подтверждаю"):
+	case request.OfferMade && containsAnyPhrase(message, "согласен", "согласна", "принимаю", "договорились", "подтверждаю", "меня устраивает", "условия подходят", "готов принять", "готова принять", "фиксируем"):
 		result.Intent = "accept"
 	case containsAnyPhrase(message, "если не договоримся", "моя альтернатива", "альтернативный вариант", "другой поставщик", "другое предложение"):
 		result.Intent = "state_batna"
-	case containsAnyPhrase(message, "к чему привед", "какие последствия", "что произойдет", "что случится", "чем грозит"):
+	case containsAnyPhrase(message, "к чему привед", "какие последствия", "что произойдет", "что произойдёт", "что случится", "чем грозит"):
 		result.Intent = "explore_implication"
 	case containsAnyPhrase(message, "что даст", "какую пользу", "какая выгода", "какую ценность", "что изменится после"):
 		result.Intent = "clarify_need_payoff"
@@ -36,7 +36,7 @@ func (RuleBasedMoveInterpreter) InterpretMove(_ context.Context, request Interpr
 		result.Intent = "identify_problem"
 	case containsAnyPhrase(message, "как сейчас", "как устроен", "как происходит", "какой процесс", "какие ресурсы", "какой бюджет"):
 		result.Intent = "ask_situation"
-	case strings.Contains(message, "?") && containsAnyPhrase(message, "что важно", "для вас важно", "приоритет", "критич", "критери", "интерес", "цель"):
+	case asksAboutInterests(message):
 		result.Intent = "ask_interest"
 	case containsAnyPhrase(message, "предлагаю", "готовы ли вы", "давайте зафиксируем", "если мы пойдем навстречу", "если мы пойдём навстречу"):
 		result.Intent = "propose"
@@ -52,10 +52,26 @@ func (RuleBasedMoveInterpreter) InterpretMove(_ context.Context, request Interpr
 }
 
 func containsEvidence(message string) bool {
-	if integerPattern.MatchString(message) || strings.Contains(message, "%") {
+	if strings.Contains(message, "%") || containsAnyPhrase(message, "по данным", "исследование показало", "результат вырос", "результат снизился", "метрика", "статистика", "факты показывают") {
 		return true
 	}
-	return containsAnyPhrase(message, "по данным", "исследование показало", "результат вырос", "результат снизился", "метрика", "статистика", "факты показывают")
+	if !integerPattern.MatchString(message) {
+		return false
+	}
+	return containsAnyPhrase(message,
+		"процент", "день", "недел", "месяц", "год", "руб", "доллар", "евро",
+		"рост", "вырос", "сниз", "сократ", "увелич", "конверси", "выручк",
+		"затрат", "эконом", "срок", "результат", "тест", "замер", "данн",
+	)
+}
+
+func asksAboutInterests(message string) bool {
+	if !containsAnyPhrase(message, "что важно", "для вас важно", "приоритет", "критич", "критери", "интерес", "цель") {
+		return false
+	}
+	return strings.Contains(message, "?") || containsAnyPhrase(message,
+		"расскажите", "уточните", "объясните", "хочу понять", "хотел бы понять", "хотела бы понять", "давайте выясним",
+	)
 }
 
 func populateProposal(result *MoveInterpretation, request InterpretationRequest, message string) {
