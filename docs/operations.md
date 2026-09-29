@@ -24,6 +24,12 @@ docker compose logs --tail 100 model
 docker compose up -d --build app
 ```
 
+После изменения ArenaLM, её зависимостей или артефакта модели:
+
+```powershell
+docker compose up -d --build model app
+```
+
 Остановка с сохранением PostgreSQL:
 
 ```powershell

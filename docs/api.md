@@ -160,6 +160,7 @@
 
 Допустимые `intent`:
 
+- нейтральная или неопределённая реплика: `neutral`;
 - Гарвардский метод: `ask_interest`, `present_evidence`, `propose`, `accept`;
 - SPIN: `ask_situation`, `identify_problem`, `explore_implication`,
   `clarify_need_payoff`;
@@ -308,7 +309,8 @@ SPIN-ходы лучше отправлять последовательно: с
 - `proposal_before_interests`;
 - `proposal_without_evidence`;
 - `proposal_outside_limit`;
-- `pressure_tactic`.
+- `pressure_tactic`;
+- `repeated_move`.
 
 ### Итог переговоров
 

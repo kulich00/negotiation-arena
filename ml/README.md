@@ -28,8 +28,7 @@ Runtime корпус можно добавить несколькими флаг
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
-python -m pip install numpy==2.3.3
+python -m pip install --index-url https://download.pytorch.org/whl/cpu -r ml/requirements.txt
 ```
 
 Зависимости устанавливаются в `.venv`, который исключён из Git.
@@ -57,6 +56,23 @@ python -m unittest ml.tests.test_model -v
 
 - `GET /health` — готовность и версия модели;
 - `POST /v1/interpret` — классификация `InterpretationRequest` backend.
+
+Пример запроса:
+
+```json
+{
+  "message": "Какие условия для вас наиболее важны?",
+  "scenarioTopic": "Условия поставки",
+  "playerGoal": "Согласовать выгодные условия",
+  "opponentRole": "Поставщик",
+  "phase": "exploration",
+  "offerMade": false,
+  "proposalKind": "none",
+  "proposalMaximum": 0,
+  "proposalAlternatives": [],
+  "conversationHistory": []
+}
+```
 
 Пример ответа:
 
