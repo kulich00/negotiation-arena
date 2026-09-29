@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://negotiation-arena.local/corpus/schema-v1.json",
+  "title": "Negotiation Arena dialogue corpus record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "origin", "dialogueId", "status", "startedAt", "scenario", "initialMessage", "turns", "quality"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "origin": {"enum": ["runtime", "synthetic"]},
+    "dialogueId": {"type": "string", "minLength": 1},
+    "parentDialogueId": {"type": "string", "minLength": 1},
+    "forkedFromTurn": {"type": "integer", "minimum": 0},
+    "status": {"enum": ["active", "finished", "abandoned"]},
+    "startedAt": {"type": "string", "format": "date-time"},
+    "finishedAt": {"type": "string", "format": "date-time"},
+    "scenario": {
+      "type": "object",
+      "required": ["id", "title", "sphere", "topic", "difficulty", "opponentRole", "opponentTone", "playerGoal", "opponentGoal", "initialMessage", "rules"],
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "sphere": {"type": "string"},
+        "topic": {"type": "string"},
+        "difficulty": {"enum": ["easy", "medium", "hard"]},
+        "opponentRole": {"type": "string"},
+        "opponentTone": {"type": "string"},
+        "playerGoal": {"type": "string"},
+        "opponentGoal": {"type": "string"},
+        "initialMessage": {"type": "string"},
+        "rules": {"type": "object"}
+      }
+    },
+    "initialMessage": {"$ref": "#/$defs/message"},
+    "turns": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/turn"}
+    },
+    "result": {"type": "object"},
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "issues"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "issues": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text", "createdAt"],
+      "properties": {
+        "role": {"enum": ["player", "opponent"]},
+        "text": {"type": "string", "minLength": 1},
+        "createdAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trustScore", "argumentScore", "pressureScore", "state"],
+      "properties": {
+        "trustScore": {"type": "integer", "minimum": 0, "maximum": 100},
+        "argumentScore": {"type": "integer", "minimum": 0, "maximum": 100},
+        "pressureScore": {"type": "integer", "minimum": 0, "maximum": 100},
+        "state": {"type": "object"}
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "required": ["intent", "technique", "trustDelta", "argumentDelta", "pressureDelta", "summary", "strengths", "risks", "errors", "recommendation"],
+      "properties": {
+        "intent": {"type": "string"},
+        "technique": {"type": "string"},
+        "interpretationSource": {"enum": ["structured", "local", "gemini", "legacy", "unknown"]},
+        "replySource": {"enum": ["local", "gemini", "legacy", "custom", "unknown"]},
+        "trustDelta": {"type": "integer"},
+        "argumentDelta": {"type": "integer"},
+        "pressureDelta": {"type": "integer"},
+        "summary": {"type": "string"},
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "errors": {"type": "array", "items": {"type": "object"}},
+        "opponentReaction": {"type": "object"},
+        "recommendation": {"type": "string"}
+      }
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turn", "player", "opponent", "analysis"],
+      "properties": {
+        "turn": {"type": "integer", "minimum": 1},
+        "player": {"$ref": "#/$defs/message"},
+        "opponent": {"$ref": "#/$defs/message"},
+        "analysis": {"$ref": "#/$defs/analysis"},
+        "before": {"$ref": "#/$defs/snapshot"},
+        "after": {"$ref": "#/$defs/snapshot"}
+      }
+    }
+  }
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
 	"github.com/kulich00/negotiation-arena/backend/internal/llm"
+	arenametrics "github.com/kulich00/negotiation-arena/backend/internal/metrics"
 	"github.com/kulich00/negotiation-arena/backend/internal/repository"
 )
 
@@ -19,6 +20,7 @@ type Service struct {
 	provider        llm.Provider
 	replyGenerator  llm.ReplyGenerator
 	moveInterpreter llm.MoveInterpreter
+	metrics         *arenametrics.Registry
 }
 
 type ServiceOption func(*Service)
@@ -34,6 +36,12 @@ func WithReplyGenerator(generator llm.ReplyGenerator) ServiceOption {
 func WithMoveInterpreter(interpreter llm.MoveInterpreter) ServiceOption {
 	return func(service *Service) {
 		service.moveInterpreter = interpreter
+	}
+}
+
+func WithMetrics(registry *arenametrics.Registry) ServiceOption {
+	return func(service *Service) {
+		service.metrics = registry
 	}
 }
 
@@ -177,7 +185,13 @@ func (s *Service) StartSessionForPlayer(ctx context.Context, scenarioID, playerI
 	state := domain.InitialSessionState()
 	InitializeOpponentState(&state, scenario.Rules)
 	session := domain.Session{ID: newID(), ScenarioID: scenarioID, PlayerID: playerID, Status: domain.SessionStatusActive, TrustScore: 50, ArgumentScore: 0, PressureScore: 0, InitialMessage: scenario.InitialMessage, StartedAt: time.Now().UTC(), State: state}
-	return session, s.repo.SaveSession(ctx, session)
+	if err := s.repo.SaveSession(ctx, session); err != nil {
+		return domain.Session{}, err
+	}
+	if s.metrics != nil {
+		s.metrics.ObserveSessionStarted(scenarioID)
+	}
+	return session, nil
 }
 
 func (s *Service) Session(ctx context.Context, id string) (domain.Session, error) {
@@ -267,6 +281,9 @@ func (s *Service) ForkSession(ctx context.Context, parentID string, turn int) (d
 	if err := s.repo.ForkSession(ctx, parentID, child); err != nil {
 		return domain.Session{}, err
 	}
+	if s.metrics != nil {
+		s.metrics.ObserveSessionStarted(child.ScenarioID)
+	}
 	return child, nil
 }
 
@@ -309,19 +326,25 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	repeatedMessage := s.isRepeatedPlayerMessage(ctx, session.ID, message)
 	effectiveMove := move
 	interpretationFailed := false
+	interpretationSource := "structured"
 	if move == nil && s.moveInterpreter != nil {
-		interpreted, err := s.interpretMove(ctx, message, session, scenario)
+		interpreted, source, err := s.interpretMove(ctx, message, session, scenario)
 		if err != nil {
 			interpretationFailed = true
+			interpretationSource = "legacy"
 		} else if interpreted != nil {
 			effectiveMove = interpreted
+			interpretationSource = source
 		}
+	} else if move == nil {
+		interpretationSource = "legacy"
 	}
 
 	var (
-		evaluation MoveEvaluation
-		reply      string
-		analysis   domain.TurnAnalysis
+		evaluation  MoveEvaluation
+		reply       string
+		replySource string
+		analysis    domain.TurnAnalysis
 	)
 	if effectiveMove != nil {
 		if err := ValidateMove(*effectiveMove, scenario.Rules); err != nil {
@@ -354,14 +377,17 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 		evaluation = ApplyOpponentBehavior(behaviorMove, session.Turn+1, scenario.Rules, evaluation)
 		reply = difficultOpponentReply(reply, evaluation.OpponentReaction)
 		analysis = AnalyzeLegacyMove(providerAnalysis)
+		replySource = "legacy"
 		if evaluation.OpponentReaction != nil {
 			reaction := *evaluation.OpponentReaction
 			analysis.OpponentReaction = &reaction
 		}
 	}
 	if !interpretationFailed {
-		reply = s.generateReply(ctx, reply, message, session, scenario, evaluation.State)
+		reply, replySource = s.generateReply(ctx, reply, message, session, scenario, evaluation.State)
 	}
+	analysis.InterpretationSource = interpretationSource
+	analysis.ReplySource = replySource
 	expectedTurn := session.Turn
 	session.Turn++
 	session.TrustScore = clamp(session.TrustScore + evaluation.TrustDelta)
@@ -372,6 +398,9 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	}
 	if err := s.repo.ApplyTurn(ctx, session, expectedTurn, message, reply, analysis); err != nil {
 		return TurnResult{}, err
+	}
+	if s.metrics != nil {
+		s.metrics.ObserveMove(analysis.Intent, analysis.Technique, analysis.ReplySource, analysis.TrustDelta, analysis.ArgumentDelta, analysis.PressureDelta)
 	}
 	turnResult := TurnResult{Reply: reply, Session: session, Analysis: analysis}
 	if session.State.OfferAccepted {
@@ -385,7 +414,7 @@ func (s *Service) processTurn(ctx context.Context, sessionID, message string, mo
 	return turnResult, nil
 }
 
-func (s *Service) interpretMove(ctx context.Context, message string, session domain.Session, scenario domain.Scenario) (*PlayerMove, error) {
+func (s *Service) interpretMove(ctx context.Context, message string, session domain.Session, scenario domain.Scenario) (*PlayerMove, string, error) {
 	rules := scenario.Rules.WithDefaults()
 	interpretation, err := s.moveInterpreter.InterpretMove(ctx, llm.InterpretationRequest{
 		Message: message, ScenarioTopic: scenario.Topic, PlayerGoal: scenario.PlayerGoal,
@@ -396,10 +425,14 @@ func (s *Service) interpretMove(ctx context.Context, message string, session dom
 		ConversationHistory:  s.recentConversation(ctx, session.ID),
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	source := interpretation.Source
+	if source == "" {
+		source = "unknown"
 	}
 	if interpretation.Relevant != nil && !*interpretation.Relevant {
-		return &PlayerMove{Content: message, Intent: IntentNeutral}, nil
+		return &PlayerMove{Content: message, Intent: IntentNeutral}, source, nil
 	}
 	move := PlayerMove{Content: message, Intent: MoveIntent(interpretation.Intent)}
 	if move.Intent == IntentPropose && rules.Proposal.Kind != "none" {
@@ -411,12 +444,12 @@ func (s *Service) interpretMove(ctx context.Context, message string, session dom
 		}
 	}
 	if err := ValidateMove(move, rules); err != nil {
-		return &PlayerMove{Content: message, Intent: IntentNeutral}, nil
+		return &PlayerMove{Content: message, Intent: IntentNeutral}, source, nil
 	}
 	if move.Intent == IntentAccept && (!session.State.OfferMade || session.State.LastOfferQuality == domain.OfferQualityRejected) {
-		return &PlayerMove{Content: message, Intent: IntentNeutral}, nil
+		return &PlayerMove{Content: message, Intent: IntentNeutral}, source, nil
 	}
-	return &move, nil
+	return &move, source, nil
 }
 
 func (s *Service) isRepeatedPlayerMessage(ctx context.Context, sessionID, message string) bool {
@@ -454,19 +487,31 @@ func normalizeMessageForComparison(value string) string {
 	return normalized.String()
 }
 
-func (s *Service) generateReply(ctx context.Context, baseReply, playerMessage string, session domain.Session, scenario domain.Scenario, state domain.SessionState) string {
+func (s *Service) generateReply(ctx context.Context, baseReply, playerMessage string, session domain.Session, scenario domain.Scenario, state domain.SessionState) (string, string) {
 	history := s.recentConversation(ctx, session.ID)
-	reply, err := s.replyGenerator.GenerateReply(ctx, llm.ReplyRequest{
+	request := llm.ReplyRequest{
 		BaseReply: baseReply, PlayerMessage: playerMessage,
 		ScenarioTopic: scenario.Topic, OpponentRole: scenario.OpponentRole,
 		OpponentTone: scenario.OpponentTone, OpponentGoal: scenario.OpponentGoal,
 		Phase: string(state.Phase), Mood: state.OpponentMood,
 		Priority: state.OpponentPriority, Turn: session.Turn + 1, History: history,
-	})
-	if err != nil || strings.TrimSpace(reply) == "" {
-		return baseReply
 	}
-	return strings.TrimSpace(reply)
+	if traced, ok := s.replyGenerator.(llm.TracedReplyGenerator); ok {
+		generation, err := traced.GenerateReplyWithTrace(ctx, request)
+		if err != nil || strings.TrimSpace(generation.Text) == "" {
+			return baseReply, "local"
+		}
+		source := strings.TrimSpace(generation.Source)
+		if source == "" {
+			source = "unknown"
+		}
+		return strings.TrimSpace(generation.Text), source
+	}
+	reply, err := s.replyGenerator.GenerateReply(ctx, request)
+	if err != nil || strings.TrimSpace(reply) == "" {
+		return baseReply, "local"
+	}
+	return strings.TrimSpace(reply), "custom"
 }
 
 func (s *Service) recentConversation(ctx context.Context, sessionID string) []llm.ConversationMessage {
@@ -556,6 +601,9 @@ func (s *Service) finalize(ctx context.Context, session domain.Session, scenario
 			}
 		}
 		return domain.Session{}, domain.Result{}, err
+	}
+	if s.metrics != nil {
+		s.metrics.ObserveSessionCompleted(status, result.OutcomeCode)
 	}
 	return session, result, nil
 }

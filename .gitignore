@@ -7,7 +7,10 @@ frontend/dist/
 frontend/coverage/
 backend/bin/
 backend/coverage.out
-backend/.gocache/
+backend/.gocache*/
+**/__pycache__/
+*.py[cod]
+corpus/exports/
 *.log
 /negotiation-arena/
 

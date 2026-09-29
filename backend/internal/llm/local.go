@@ -16,7 +16,7 @@ var integerPattern = regexp.MustCompile(`\d+`)
 
 func (RuleBasedMoveInterpreter) InterpretMove(_ context.Context, request InterpretationRequest) (MoveInterpretation, error) {
 	message := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(request.Message)), "ё", "е")
-	result := MoveInterpretation{Intent: "neutral", Relevant: boolPointer(false)}
+	result := MoveInterpretation{Intent: "neutral", Relevant: boolPointer(false), Source: "local"}
 	if message == "" {
 		return result, nil
 	}

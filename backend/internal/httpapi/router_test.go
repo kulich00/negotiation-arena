@@ -368,6 +368,54 @@ func TestAdminSessionHistoryAndStatistics(t *testing.T) {
 	}
 }
 
+func TestAdminCorpusExport(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	service := negotiation.NewService(repo, llm.NewMockProvider())
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	authService, token := newTestAdminAuth(t, repo)
+	router := NewHandler(service, authService, nil, slog.Default()).Router(http.NotFoundHandler())
+	sessionID := startTestSession(t, router, "vendor-introduction")
+	if _, err := service.ProcessMove(context.Background(), sessionID, negotiation.PlayerMove{
+		Content: "Что для вас важно?", Intent: negotiation.IntentAskInterest,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Abandon(context.Background(), sessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/corpus?status=abandoned&format=jsonl", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/x-ndjson; charset=utf-8" || response.Header().Get("X-Corpus-Schema-Version") != domain.CorpusSchemaVersion {
+		t.Fatalf("corpus response: status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	lines := strings.Split(strings.TrimSpace(response.Body.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected one JSONL record, got %d", len(lines))
+	}
+	var dialogue domain.CorpusDialogue
+	if err := json.Unmarshal([]byte(lines[0]), &dialogue); err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.DialogueID != sessionID || len(dialogue.Turns) != 1 || dialogue.Turns[0].Analysis.ReplySource != "local" {
+		t.Fatalf("unexpected exported dialogue: %+v", dialogue)
+	}
+	encoded := response.Body.String()
+	if strings.Contains(encoded, `"playerId"`) {
+		t.Fatalf("corpus leaked player identifier: %s", encoded)
+	}
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/admin/corpus", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized corpus status %d", unauthorized.Code)
+	}
+}
+
 func TestJSONBodyMustContainOneKnownObject(t *testing.T) {
 	service := negotiation.NewService(repository.NewMemoryRepository(), llm.NewMockProvider())
 	if err := service.SeedDefaults(context.Background()); err != nil {

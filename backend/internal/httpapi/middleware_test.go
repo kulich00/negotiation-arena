@@ -12,9 +12,46 @@ import (
 	"time"
 
 	"github.com/kulich00/negotiation-arena/backend/internal/llm"
+	arenametrics "github.com/kulich00/negotiation-arena/backend/internal/metrics"
 	"github.com/kulich00/negotiation-arena/backend/internal/negotiation"
 	"github.com/kulich00/negotiation-arena/backend/internal/repository"
 )
+
+func TestMetricsEndpointUsesStableRouteLabels(t *testing.T) {
+	registry := arenametrics.NewRegistry()
+	repo := repository.NewMemoryRepository()
+	service := negotiation.NewService(repo, llm.NewMockProvider(), negotiation.WithMetrics(registry))
+	if err := service.SeedDefaults(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	router := NewHandler(service, nil, nil, slog.Default(), WithMetrics(registry)).Router(http.NotFoundHandler())
+
+	health := httptest.NewRecorder()
+	router.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health/live", nil))
+	sessionID := startTestSession(t, router, "vendor-introduction")
+	move := httptest.NewRecorder()
+	router.ServeHTTP(move, httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+sessionID+"/messages", strings.NewReader(`{"content":"Что важно?","intent":"ask_interest"}`)))
+	if move.Code != http.StatusOK {
+		t.Fatalf("move status %d: %s", move.Code, move.Body.String())
+	}
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := response.Body.String()
+	for _, expected := range []string{
+		`route="/health/live"`,
+		`route="/api/v1/sessions/{id}/messages"`,
+		`arena_sessions_started_total{scenario="vendor-introduction"} 1`,
+		`arena_negotiation_moves_total{intent="ask_interest",technique="harvard_interests",reply_source="local"} 1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("metric %q missing from:\n%s", expected, body)
+		}
+	}
+	if strings.Contains(body, sessionID) {
+		t.Fatalf("session ID leaked into metric labels: %s", body)
+	}
+}
 
 func TestPublicMutationRateLimit(t *testing.T) {
 	repo := repository.NewMemoryRepository()

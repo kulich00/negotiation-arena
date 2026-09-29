@@ -404,6 +404,14 @@ SPIN-ходы лучше отправлять последовательно: с
 - `GET /api/v1/admin/sessions` — история сессий с пагинацией;
 - `GET /api/v1/admin/sessions/{id}` — сессия, сценарий, сообщения, контрольные точки и результат;
 - `GET /api/v1/admin/session-statistics` — агрегированная статистика.
+- `GET /api/v1/admin/corpus` — анонимизированный корпус диалогов для обучения и
+  оценки моделей. По умолчанию возвращается JSONL; `format=json` возвращает
+  страницу JSON. Работают фильтры `status`, `scenarioId`, `limit`, `offset`.
+
+Экспорт корпуса содержит приватные правила сценария и поэтому требует Bearer
+token администратора. Идентификатор и имя игрока не включаются. Формат версии
+`1.0` описан в `corpus/schema-v1.json`; рекомендации по разделению train/test —
+в `corpus/README.md`.
 
 Вход:
 
@@ -440,4 +448,6 @@ Authorization: Bearer <token>
 
 - `GET /health/live` — процесс работает.
 - `GET /health/ready` — приложение готово и база доступна.
+- `GET /metrics` — Prometheus exposition format с HTTP, LLM и игровыми
+  метриками. Динамические ID не используются в labels.
 

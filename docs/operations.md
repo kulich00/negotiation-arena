@@ -60,6 +60,16 @@ curl.exe -sS http://localhost:8080/health/ready
 Ожидаемый ответ — `200 OK` и `{"status":"ready"}`. Ошибка соединения с БД
 возвращает `503 Service Unavailable`.
 
+Prometheus-метрики доступны без авторизации на локальном endpoint:
+
+```powershell
+curl.exe -sS http://localhost:8080/metrics
+```
+
+Экспортируются HTTP latency и статусы по шаблону маршрута, обращения к Gemini и
+fallback, игровые намерения и техники, изменения показателей, запуски и исходы
+сессий. ID игроков и сессий в labels не попадают.
+
 Docker healthcheck использует liveness. Для проверки готовности приложения к
 трафику следует использовать readiness.
 

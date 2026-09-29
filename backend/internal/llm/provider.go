@@ -50,6 +50,19 @@ type ReplyGenerator interface {
 	GenerateReply(context.Context, ReplyRequest) (string, error)
 }
 
+type ReplyGeneration struct {
+	Text   string
+	Source string
+}
+
+type TracedReplyGenerator interface {
+	GenerateReplyWithTrace(context.Context, ReplyRequest) (ReplyGeneration, error)
+}
+
+type Observer interface {
+	ObserveLLM(operation, result string)
+}
+
 // InterpretationRequest contains only the context needed to classify a free
 // form player message into the engine's finite set of moves.
 type InterpretationRequest struct {
@@ -70,6 +83,7 @@ type MoveInterpretation struct {
 	ProposalValue int    `json:"proposalValue"`
 	AlternativeID string `json:"alternativeId"`
 	Relevant      *bool  `json:"relevant,omitempty"`
+	Source        string `json:"-"`
 }
 
 // MoveInterpreter classifies natural language. Its output must still pass the
@@ -86,6 +100,10 @@ func NewPassthroughReplyGenerator() PassthroughReplyGenerator {
 
 func (PassthroughReplyGenerator) GenerateReply(_ context.Context, request ReplyRequest) (string, error) {
 	return request.BaseReply, nil
+}
+
+func (PassthroughReplyGenerator) GenerateReplyWithTrace(_ context.Context, request ReplyRequest) (ReplyGeneration, error) {
+	return ReplyGeneration{Text: request.BaseReply, Source: "local"}, nil
 }
 
 func (PassthroughReplyGenerator) InterpretMove(ctx context.Context, request InterpretationRequest) (MoveInterpretation, error) {

@@ -16,6 +16,7 @@ import (
 	"github.com/kulich00/negotiation-arena/backend/internal/database"
 	"github.com/kulich00/negotiation-arena/backend/internal/httpapi"
 	"github.com/kulich00/negotiation-arena/backend/internal/llm"
+	arenametrics "github.com/kulich00/negotiation-arena/backend/internal/metrics"
 	"github.com/kulich00/negotiation-arena/backend/internal/negotiation"
 	"github.com/kulich00/negotiation-arena/backend/internal/repository"
 	"github.com/kulich00/negotiation-arena/backend/internal/webapp"
@@ -47,12 +48,13 @@ func main() {
 		}
 		repo = repository.NewPostgresRepository(db)
 	}
-	replyGenerator, err := configureReplyGenerator(cfg, logger)
+	metricRegistry := arenametrics.NewRegistry()
+	replyGenerator, err := configureReplyGenerator(cfg, logger, metricRegistry)
 	if err != nil {
 		logger.Error("LLM configuration failed", "error", err)
 		os.Exit(1)
 	}
-	serviceOptions := []negotiation.ServiceOption{negotiation.WithReplyGenerator(replyGenerator)}
+	serviceOptions := []negotiation.ServiceOption{negotiation.WithReplyGenerator(replyGenerator), negotiation.WithMetrics(metricRegistry)}
 	if interpreter, ok := replyGenerator.(llm.MoveInterpreter); ok {
 		serviceOptions = append(serviceOptions, negotiation.WithMoveInterpreter(interpreter))
 	}
@@ -76,6 +78,7 @@ func main() {
 		service, authService, db, logger,
 		httpapi.WithRateLimit(cfg.APIRateLimit, cfg.APIRateWindow),
 		httpapi.WithTrustedProxyHeaders(cfg.TrustProxyHeaders),
+		httpapi.WithMetrics(metricRegistry),
 	)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -118,7 +121,7 @@ func newLogger(configuredLevel string) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }
 
-func configureReplyGenerator(cfg config.Config, logger *slog.Logger) (llm.ReplyGenerator, error) {
+func configureReplyGenerator(cfg config.Config, logger *slog.Logger, observer llm.Observer) (llm.ReplyGenerator, error) {
 	passthrough := llm.NewPassthroughReplyGenerator()
 	switch strings.ToLower(strings.TrimSpace(cfg.LLMProvider)) {
 	case "", "mock":
@@ -133,7 +136,7 @@ func configureReplyGenerator(cfg config.Config, logger *slog.Logger) (llm.ReplyG
 			return nil, err
 		}
 		logger.Info("Gemini enabled", "model", cfg.LLMModel, "apiKeyCount", generator.APIKeyCount())
-		return llm.NewFallbackReplyGenerator(generator, passthrough, logger), nil
+		return llm.NewFallbackReplyGenerator(generator, passthrough, logger).WithObserver(observer), nil
 	default:
 		return nil, fmt.Errorf("unsupported LLM_PROVIDER %q (use mock or gemini)", cfg.LLMProvider)
 	}

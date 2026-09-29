@@ -294,18 +294,22 @@ func TestNewGeminiGeneratorNormalizesAndLimitsKeyPool(t *testing.T) {
 }
 
 func TestFallbackReplyGeneratorUsesDeterministicReply(t *testing.T) {
+	observer := &recordingLLMObserver{}
 	generator := NewFallbackReplyGenerator(
 		replyGeneratorFunc(func(context.Context, ReplyRequest) (string, error) {
 			return "", errors.New("provider unavailable")
 		}),
 		NewPassthroughReplyGenerator(), nil,
-	)
-	reply, err := generator.GenerateReply(context.Background(), ReplyRequest{BaseReply: "deterministic"})
+	).WithObserver(observer)
+	result, err := generator.GenerateReplyWithTrace(context.Background(), ReplyRequest{BaseReply: "deterministic"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reply != "deterministic" {
-		t.Fatalf("reply = %q", reply)
+	if result.Text != "deterministic" || result.Source != "local" {
+		t.Fatalf("generation = %+v", result)
+	}
+	if len(observer.events) != 1 || observer.events[0] != "reply:fallback" {
+		t.Fatalf("observer events = %v", observer.events)
 	}
 }
 
@@ -319,4 +323,12 @@ type replyGeneratorFunc func(context.Context, ReplyRequest) (string, error)
 
 func (function replyGeneratorFunc) GenerateReply(ctx context.Context, request ReplyRequest) (string, error) {
 	return function(ctx, request)
+}
+
+type recordingLLMObserver struct {
+	events []string
+}
+
+func (observer *recordingLLMObserver) ObserveLLM(operation, result string) {
+	observer.events = append(observer.events, operation+":"+result)
 }

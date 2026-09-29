@@ -162,6 +162,7 @@ func (g *GeminiGenerator) InterpretMove(ctx context.Context, request Interpretat
 	}
 	interpretation.Intent = strings.TrimSpace(interpretation.Intent)
 	interpretation.AlternativeID = strings.TrimSpace(interpretation.AlternativeID)
+	interpretation.Source = "gemini"
 	if _, allowed := geminiMoveIntents[interpretation.Intent]; !allowed {
 		return MoveInterpretation{}, fmt.Errorf("Gemini returned unsupported intent %q", interpretation.Intent)
 	}
@@ -406,30 +407,57 @@ type FallbackReplyGenerator struct {
 	primary  ReplyGenerator
 	fallback ReplyGenerator
 	logger   *slog.Logger
+	observer Observer
 }
 
 func NewFallbackReplyGenerator(primary, fallback ReplyGenerator, logger *slog.Logger) *FallbackReplyGenerator {
 	return &FallbackReplyGenerator{primary: primary, fallback: fallback, logger: logger}
 }
 
+func (g *FallbackReplyGenerator) WithObserver(observer Observer) *FallbackReplyGenerator {
+	g.observer = observer
+	return g
+}
+
 func (g *FallbackReplyGenerator) GenerateReply(ctx context.Context, request ReplyRequest) (string, error) {
+	result, err := g.GenerateReplyWithTrace(ctx, request)
+	return result.Text, err
+}
+
+func (g *FallbackReplyGenerator) GenerateReplyWithTrace(ctx context.Context, request ReplyRequest) (ReplyGeneration, error) {
 	reply, err := g.primary.GenerateReply(ctx, request)
 	if err == nil && strings.TrimSpace(reply) != "" {
-		return reply, nil
+		if g.observer != nil {
+			g.observer.ObserveLLM("reply", "success")
+		}
+		return ReplyGeneration{Text: reply, Source: "gemini"}, nil
 	}
 	if g.logger != nil {
 		g.logger.WarnContext(ctx, "LLM reply generation failed; using deterministic reply", "error", err)
 	}
-	return g.fallback.GenerateReply(ctx, request)
+	if g.observer != nil {
+		g.observer.ObserveLLM("reply", "fallback")
+	}
+	if traced, ok := g.fallback.(TracedReplyGenerator); ok {
+		return traced.GenerateReplyWithTrace(ctx, request)
+	}
+	fallbackReply, fallbackErr := g.fallback.GenerateReply(ctx, request)
+	return ReplyGeneration{Text: fallbackReply, Source: "local"}, fallbackErr
 }
 
 func (g *FallbackReplyGenerator) InterpretMove(ctx context.Context, request InterpretationRequest) (MoveInterpretation, error) {
 	local, localErr := (RuleBasedMoveInterpreter{}).InterpretMove(ctx, request)
 	if localErr == nil && local.Intent != "neutral" {
+		if g.observer != nil {
+			g.observer.ObserveLLM("interpretation", "local")
+		}
 		return local, nil
 	}
 	interpreter, ok := g.primary.(MoveInterpreter)
 	if !ok {
+		if g.observer != nil {
+			g.observer.ObserveLLM("interpretation", "local")
+		}
 		return local, localErr
 	}
 	interpretation, err := interpreter.InterpretMove(ctx, request)
@@ -437,7 +465,16 @@ func (g *FallbackReplyGenerator) InterpretMove(ctx context.Context, request Inte
 		g.logger.WarnContext(ctx, "LLM move interpretation failed; using local analysis", "error", err)
 	}
 	if err != nil {
+		if g.observer != nil {
+			g.observer.ObserveLLM("interpretation", "fallback")
+		}
 		return local, localErr
+	}
+	if interpretation.Source == "" {
+		interpretation.Source = "gemini"
+	}
+	if g.observer != nil {
+		g.observer.ObserveLLM("interpretation", "success")
 	}
 	return interpretation, nil
 }

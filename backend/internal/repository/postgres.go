@@ -221,7 +221,7 @@ func (r *PostgresRepository) SaveSession(ctx context.Context, s domain.Session) 
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO messages (session_id,sender,content) VALUES ($1,'opponent',$2)`, s.ID, s.InitialMessage)
+	_, err = tx.Exec(ctx, `INSERT INTO messages (session_id,sender,content,created_at) VALUES ($1,'opponent',$2,$3)`, s.ID, s.InitialMessage, s.StartedAt)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func (r *PostgresRepository) ApplyTurn(ctx context.Context, s domain.Session, ex
 }
 
 func (r *PostgresRepository) Messages(ctx context.Context, id string) ([]domain.Message, error) {
-	rows, err := r.db.Query(ctx, `SELECT sender,content,analysis FROM messages WHERE session_id=$1 ORDER BY id`, id)
+	rows, err := r.db.Query(ctx, `SELECT sender,content,analysis,created_at FROM messages WHERE session_id=$1 ORDER BY id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +332,7 @@ func (r *PostgresRepository) Messages(ctx context.Context, id string) ([]domain.
 	for rows.Next() {
 		var m domain.Message
 		var analysisJSON []byte
-		if err := rows.Scan(&m.Sender, &m.Content, &analysisJSON); err != nil {
+		if err := rows.Scan(&m.Sender, &m.Content, &analysisJSON, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		if len(analysisJSON) > 0 {

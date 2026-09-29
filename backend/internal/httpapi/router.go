@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kulich00/negotiation-arena/backend/internal/adminauth"
 	"github.com/kulich00/negotiation-arena/backend/internal/domain"
+	arenametrics "github.com/kulich00/negotiation-arena/backend/internal/metrics"
 	"github.com/kulich00/negotiation-arena/backend/internal/negotiation"
 	"github.com/kulich00/negotiation-arena/backend/internal/repository"
 )
@@ -24,6 +25,7 @@ type Handler struct {
 	auth              *adminauth.Service
 	db                *pgxpool.Pool
 	logger            *slog.Logger
+	metrics           *arenametrics.Registry
 	limiter           *fixedWindowLimiter
 	trustProxyHeaders bool
 }
@@ -44,6 +46,12 @@ func WithTrustedProxyHeaders(enabled bool) HandlerOption {
 	}
 }
 
+func WithMetrics(registry *arenametrics.Registry) HandlerOption {
+	return func(handler *Handler) {
+		handler.metrics = registry
+	}
+}
+
 func NewHandler(service *negotiation.Service, auth *adminauth.Service, db *pgxpool.Pool, logger *slog.Logger, options ...HandlerOption) *Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -61,6 +69,9 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /health/ready", h.ready)
+	if h.metrics != nil {
+		mux.Handle("GET /metrics", h.metrics)
+	}
 	mux.HandleFunc("GET /api/v1/scenarios", h.listScenarios)
 	mux.HandleFunc("GET /api/v1/achievements", h.listAchievements)
 	mux.HandleFunc("POST /api/v1/players", h.createPlayer)
@@ -83,6 +94,7 @@ func (h *Handler) Router(static http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/sessions", h.listAdminSessions)
 	mux.HandleFunc("GET /api/v1/admin/sessions/{id}", h.getAdminSession)
 	mux.HandleFunc("GET /api/v1/admin/session-statistics", h.getAdminSessionStatistics)
+	mux.HandleFunc("GET /api/v1/admin/corpus", h.exportAdminCorpus)
 	mux.Handle("/", static)
 	var handler http.Handler = h.recover(mux)
 	handler = h.rateLimit(handler)
@@ -457,6 +469,43 @@ func (h *Handler) getAdminSessionStatistics(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, statistics)
 }
 
+func (h *Handler) exportAdminCorpus(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(w, r) {
+		return
+	}
+	filter, ok := sessionFilter(w, r)
+	if !ok {
+		return
+	}
+	corpus, err := h.service.ExportCorpus(r.Context(), filter)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "corpus export failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not export corpus")
+		return
+	}
+	format := strings.TrimSpace(r.URL.Query().Get("format"))
+	if format == "json" {
+		writeJSON(w, http.StatusOK, corpus)
+		return
+	}
+	if format != "" && format != "jsonl" {
+		writeError(w, http.StatusBadRequest, "invalid corpus format")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="negotiation-corpus.jsonl"`)
+	w.Header().Set("X-Corpus-Schema-Version", corpus.SchemaVersion)
+	w.Header().Set("X-Corpus-Total", strconv.Itoa(corpus.Total))
+	w.WriteHeader(http.StatusOK)
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	for _, dialogue := range corpus.Items {
+		if err := encoder.Encode(dialogue); err != nil {
+			return
+		}
+	}
+}
+
 func sessionFilter(w http.ResponseWriter, r *http.Request) (repository.SessionFilter, bool) {
 	filter := repository.SessionFilter{
 		Status:     strings.TrimSpace(r.URL.Query().Get("status")),
@@ -564,6 +613,13 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 				"method", r.Method, "path", r.URL.Path, "status", status,
 				"bytes", writer.bytes, "duration", time.Since(start),
 			)
+			if h.metrics != nil {
+				route := strings.TrimPrefix(r.Pattern, r.Method+" ")
+				if route == "" {
+					route = "unmatched"
+				}
+				h.metrics.ObserveHTTP(r.Method, route, status, time.Since(start))
+			}
 		}()
 		next.ServeHTTP(writer, r)
 	})

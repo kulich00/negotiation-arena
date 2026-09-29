@@ -203,7 +203,7 @@ func (r *MemoryRepository) SaveSession(_ context.Context, session domain.Session
 		session.State = domain.InitialSessionState()
 	}
 	r.sessions[session.ID] = cloneSession(session)
-	r.messages[session.ID] = []domain.Message{{Sender: "opponent", Content: session.InitialMessage}}
+	r.messages[session.ID] = []domain.Message{{Sender: "opponent", Content: session.InitialMessage, CreatedAt: session.StartedAt}}
 	r.checkpoints[session.ID] = []domain.TurnCheckpoint{checkpointFromSession(session, session.StartedAt)}
 	return nil
 }
@@ -261,8 +261,9 @@ func (r *MemoryRepository) ApplyTurn(_ context.Context, session domain.Session, 
 	}
 	r.sessions[session.ID] = cloneSession(session)
 	analysis = cloneTurnAnalysis(analysis)
-	r.messages[session.ID] = append(r.messages[session.ID], domain.Message{Sender: "player", Content: message, Analysis: &analysis}, domain.Message{Sender: "opponent", Content: reply})
-	r.checkpoints[session.ID] = append(r.checkpoints[session.ID], checkpointFromSession(session, time.Now().UTC()))
+	createdAt := time.Now().UTC()
+	r.messages[session.ID] = append(r.messages[session.ID], domain.Message{Sender: "player", Content: message, Analysis: &analysis, CreatedAt: createdAt}, domain.Message{Sender: "opponent", Content: reply, CreatedAt: createdAt})
+	r.checkpoints[session.ID] = append(r.checkpoints[session.ID], checkpointFromSession(session, createdAt))
 	return nil
 }
 

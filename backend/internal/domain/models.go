@@ -350,21 +350,24 @@ type BestMoveInsight struct {
 }
 
 type Message struct {
-	Sender   string        `json:"sender"`
-	Content  string        `json:"content"`
-	Analysis *TurnAnalysis `json:"analysis,omitempty"`
+	Sender    string        `json:"sender"`
+	Content   string        `json:"content"`
+	Analysis  *TurnAnalysis `json:"analysis,omitempty"`
+	CreatedAt time.Time     `json:"createdAt"`
 }
 
 type TurnAnalysis struct {
-	Intent           string             `json:"intent"`
-	Technique        string             `json:"technique"`
-	TrustDelta       int                `json:"trustDelta"`
-	ArgumentDelta    int                `json:"argumentDelta"`
-	PressureDelta    int                `json:"pressureDelta"`
-	Summary          string             `json:"summary"`
-	Strengths        []string           `json:"strengths"`
-	Risks            []string           `json:"risks"`
-	Errors           []NegotiationError `json:"errors"`
-	OpponentReaction *OpponentReaction  `json:"opponentReaction,omitempty"`
-	Recommendation   string             `json:"recommendation"`
+	Intent               string             `json:"intent"`
+	Technique            string             `json:"technique"`
+	InterpretationSource string             `json:"interpretationSource,omitempty"`
+	ReplySource          string             `json:"replySource,omitempty"`
+	TrustDelta           int                `json:"trustDelta"`
+	ArgumentDelta        int                `json:"argumentDelta"`
+	PressureDelta        int                `json:"pressureDelta"`
+	Summary              string             `json:"summary"`
+	Strengths            []string           `json:"strengths"`
+	Risks                []string           `json:"risks"`
+	Errors               []NegotiationError `json:"errors"`
+	OpponentReaction     *OpponentReaction  `json:"opponentReaction,omitempty"`
+	Recommendation       string             `json:"recommendation"`
 }
