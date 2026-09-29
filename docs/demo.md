@@ -3,7 +3,7 @@
 ## Подготовка
 
 1. Запустить проект командой `docker compose up -d --build`.
-2. Убедиться, что `app` и `db` имеют статус `healthy` через
+2. Убедиться, что `app`, `model` и `db` имеют статус `healthy` через
    `docker compose ps`.
 3. Открыть <http://localhost:8080>.
 4. Для полностью автономной демонстрации использовать `LLM_PROVIDER=mock`.
